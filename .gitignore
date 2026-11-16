@@ -1,0 +1,4 @@
+node_modules/
+*.tgz
+.opencode/autoskill/
+.test-artifacts/

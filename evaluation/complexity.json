@@ -1,0 +1,191 @@
+{
+  "version": 1,
+  "labelScope": "Whether the completed evidence merits a semantic review, not whether a skill should be published.",
+  "cases": [
+    {
+      "id": "repeated-identical-read",
+      "expected": "reject",
+      "rationale": "Repeating the same read reveals no dependency, diagnosis, decision, or new method.",
+      "snapshot": { "sessionId": "same-read", "terminal": "success", "messages": [
+        { "id": "u", "role": "user", "text": "Read the package version", "tools": [] },
+        { "id": "a", "role": "assistant", "text": "The version is 1.0.0", "tools": [
+          { "id": "r1", "name": "read", "status": "completed", "input": { "file": "package.json" }, "output": "version: 1.0.0" },
+          { "id": "r2", "name": "read", "status": "completed", "input": { "file": "package.json" }, "output": "version: 1.0.0" },
+          { "id": "r3", "name": "read", "status": "completed", "input": { "file": "package.json" }, "output": "version: 1.0.0" },
+          { "id": "r4", "name": "read", "status": "completed", "input": { "file": "package.json" }, "output": "version: 1.0.0" },
+          { "id": "r5", "name": "read", "status": "completed", "input": { "file": "package.json" }, "output": "version: 1.0.0" },
+          { "id": "r6", "name": "read", "status": "completed", "input": { "file": "package.json" }, "output": "version: 1.0.0" },
+          { "id": "r7", "name": "read", "status": "completed", "input": { "file": "package.json" }, "output": "version: 1.0.0" },
+          { "id": "r8", "name": "read", "status": "completed", "input": { "file": "package.json" }, "output": "version: 1.0.0" }
+        ] }
+      ] }
+    },
+    {
+      "id": "many-different-files",
+      "expected": "reject",
+      "rationale": "Breadth of a routine inventory is not evidence of causal analysis or coordination.",
+      "snapshot": { "sessionId": "many-files", "terminal": "success", "messages": [
+        { "id": "u", "role": "user", "text": "List the title of each document", "tools": [] },
+        { "id": "a", "role": "assistant", "text": "Listed all eight titles", "tools": [
+          { "id": "r1", "name": "read", "status": "completed", "input": { "file": "docs/one.md" }, "output": "# One" },
+          { "id": "r2", "name": "read", "status": "completed", "input": { "file": "docs/two.md" }, "output": "# Two" },
+          { "id": "r3", "name": "read", "status": "completed", "input": { "file": "docs/three.md" }, "output": "# Three" },
+          { "id": "r4", "name": "read", "status": "completed", "input": { "file": "docs/four.md" }, "output": "# Four" },
+          { "id": "r5", "name": "read", "status": "completed", "input": { "file": "docs/five.md" }, "output": "# Five" },
+          { "id": "r6", "name": "read", "status": "completed", "input": { "file": "docs/six.md" }, "output": "# Six" },
+          { "id": "r7", "name": "read", "status": "completed", "input": { "file": "docs/seven.md" }, "output": "# Seven" },
+          { "id": "r8", "name": "read", "status": "completed", "input": { "file": "docs/eight.md" }, "output": "# Eight" }
+        ] }
+      ] }
+    },
+    {
+      "id": "spelling-error-retry",
+      "expected": "reject",
+      "rationale": "Correcting a misspelled executable is mechanical recovery, even with a successful subsequent command.",
+      "snapshot": { "sessionId": "typo", "terminal": "success", "messages": [
+        { "id": "u", "role": "user", "text": "Show the repository status", "tools": [] },
+        { "id": "a", "role": "assistant", "text": "Working tree is clean", "tools": [
+          { "id": "wrong", "name": "shell", "status": "error", "input": { "command": "gti status" }, "output": "gti: command not found" },
+          { "id": "right", "name": "shell", "status": "completed", "input": { "command": "git status" }, "output": "Working tree clean" },
+          { "id": "again", "name": "shell", "status": "completed", "input": { "command": "git status --short" }, "output": "No changed files" },
+          { "id": "check", "name": "shell", "status": "completed", "input": { "command": "git diff --stat" }, "output": "Verified zero changed lines" }
+        ] }
+      ] }
+    },
+    {
+      "id": "unchanged-command-retry",
+      "expected": "reject",
+      "rationale": "An error followed by an identical command does not establish diagnosis or an improved method.",
+      "snapshot": { "sessionId": "retry", "terminal": "success", "messages": [
+        { "id": "u", "role": "user", "text": "Run the existing tests", "tools": [] },
+        { "id": "a", "role": "assistant", "text": "Tests passed after another run", "tools": [
+          { "id": "one", "name": "shell", "status": "error", "input": { "command": "npm test" }, "output": "Temporary connection failure" },
+          { "id": "two", "name": "shell", "status": "completed", "input": { "command": "npm test" }, "output": "12 tests passed" },
+          { "id": "three", "name": "shell", "status": "completed", "input": { "command": "npm test" }, "output": "12 tests passed" },
+          { "id": "four", "name": "shell", "status": "completed", "input": { "command": "npm test" }, "output": "12 tests passed" }
+        ] }
+      ] }
+    },
+    {
+      "id": "two-call-root-cause",
+      "expected": "accept",
+      "rationale": "Concrete collision reproduction identifies a hidden tenant-key dependency, followed by an independent isolation regression.",
+      "snapshot": { "sessionId": "two-call", "terminal": "success", "messages": [
+        { "id": "u", "role": "user", "text": "Explain the invoice cache contamination and verify the cause", "tools": [] },
+        { "id": "a", "role": "assistant", "text": "The tenant dimension was omitted from the cache key", "tools": [
+          { "id": "reproduce", "name": "shell", "status": "completed", "input": { "command": "node scripts/reproduce-cache.js --tenant A --tenant B" }, "output": "Root cause identified: cache key depends only on invoice ID. Trace: tenant A invoice 42 -> invoice:42; tenant B invoice 42 -> invoice:42. Including tenant ID separates the two records." },
+          { "id": "verify", "name": "shell", "status": "completed", "input": { "command": "node --test test/cache-isolation.test.js" }, "output": "Independent regression verified: cross-tenant cache collision reproduced with the old key; tenant-aware key keeps both records isolated. 6 tests passed." }
+        ] }
+      ] }
+    },
+    {
+      "id": "diagnose-change-verify",
+      "expected": "accept",
+      "rationale": "Failure is investigated against the schema, then the query strategy changes and a targeted regression validates the resolution.",
+      "snapshot": { "sessionId": "diagnose", "terminal": "success", "messages": [
+        { "id": "u", "role": "user", "text": "Correct the duplicate settlement totals", "tools": [] },
+        { "id": "a", "role": "assistant", "text": "The join now aggregates allocations before joining payments", "tools": [
+          { "id": "failure", "name": "shell", "status": "error", "input": { "command": "npm test -- settlement" }, "output": "Settlement expected 100, received 200 for one payment with two allocations" },
+          { "id": "inspect", "name": "read", "status": "completed", "input": { "file": "db/settlement.sql" }, "output": "Root cause: joining payment rows directly to allocation rows duplicates the payment amount. The aggregation must happen before the payment join." },
+          { "id": "fix", "name": "apply_patch", "status": "completed", "input": { "file": "db/settlement.sql", "patch": "aggregate allocations by payment_id in a CTE, then join once" }, "output": "Updated db/settlement.sql to aggregate allocations before joining payments" },
+          { "id": "verify", "name": "shell", "status": "completed", "input": { "command": "npm test -- settlement" }, "output": "Settlement regression verified: one payment with two allocations totals 100; 9 tests passed" }
+        ] }
+      ] }
+    },
+    {
+      "id": "cross-module-contract",
+      "expected": "accept",
+      "rationale": "A producer/consumer contract dependency requires coordinated changes on both sides and an integration check.",
+      "snapshot": { "sessionId": "contract", "terminal": "success", "messages": [
+        { "id": "u", "role": "user", "text": "Migrate the response contract without breaking the client", "tools": [] },
+        { "id": "a", "role": "assistant", "text": "Producer and consumer now agree on the versioned response", "tools": [
+          { "id": "inspect", "name": "read", "status": "completed", "input": { "files": ["api/schema.ts", "client/decoder.ts"] }, "output": "Dependency: api/schema.ts is the producer of ResponseV2; client/decoder.ts consumes its version field. The old decoder treats every response as V1, so schema-only migration breaks decoding." },
+          { "id": "producer", "name": "apply_patch", "status": "completed", "input": { "file": "api/schema.ts", "patch": "emit version: 2 and a typed payload" }, "output": "Updated producer api/schema.ts to emit a versioned response" },
+          { "id": "consumer", "name": "apply_patch", "status": "completed", "input": { "file": "client/decoder.ts", "patch": "branch on response.version; preserve V1 compatibility" }, "output": "Updated consumer client/decoder.ts to support both versions" },
+          { "id": "verify", "name": "shell", "status": "completed", "input": { "command": "npm test -- response-contract" }, "output": "Integration verified: V1 compatibility and V2 producer/consumer contract both passed, 14 tests passed" }
+        ] }
+      ] }
+    },
+    {
+      "id": "read-only-reconciliation",
+      "expected": "accept",
+      "rationale": "Independent accounting sources and a separately computed reconciliation support a non-obvious causal finding without editing files.",
+      "snapshot": { "sessionId": "reconciliation", "terminal": "success", "messages": [
+        { "id": "u", "role": "user", "text": "Explain the difference between posted and settled totals", "tools": [] },
+        { "id": "ledger", "role": "assistant", "text": "The difference is caused by reversal timing rather than missing payments", "tools": [
+          { "id": "posted", "name": "query", "status": "completed", "input": { "sql": "select account_id, sum(amount) from posted_ledger group by account_id" }, "output": "Posted source total: 120. Root cause candidate: a 20 reversal is posted before midnight while settlement uses next-day value date." },
+          { "id": "settled", "name": "query", "status": "completed", "input": { "sql": "select account_id, value_date, sum(amount) from settlements group by account_id, value_date" }, "output": "Independent settlement source: same payment IDs total 100 on the first value date; reversal 20 belongs to the next value date. No payment IDs are missing." },
+          { "id": "verify", "name": "shell", "status": "completed", "input": { "command": "python verify_reconciliation.py --posted posted.csv --settled settled.csv" }, "output": "Independent reconciliation verified: shifting the reversal by its value date explains the exact 20 difference, all account balances matched." }
+        ] }
+      ] }
+    },
+    {
+      "id": "unverified-diagnosis",
+      "expected": "reject",
+      "rationale": "An apparent diagnosis without an independent check is insufficient for automatic review eligibility.",
+      "snapshot": { "sessionId": "unverified", "terminal": "success", "messages": [
+        { "id": "u", "role": "user", "text": "Find the cache problem", "tools": [] },
+        { "id": "a", "role": "assistant", "text": "Likely the key is incomplete", "tools": [
+          { "id": "trace", "name": "read", "status": "completed", "input": { "file": "logs/cache.log" }, "output": "Root cause candidate: cache key omits tenant ID; not independently reproduced" },
+          { "id": "code", "name": "read", "status": "completed", "input": { "file": "src/cache.ts" }, "output": "function key(invoiceId) returns invoiceId" }
+        ] }
+      ] }
+    },
+    {
+      "id": "routine-batch-edit",
+      "expected": "reject",
+      "rationale": "Applying an identical title substitution to many independent documents is routine repetition, even with a link check.",
+      "snapshot": { "sessionId": "routine", "terminal": "success", "messages": [
+        { "id": "u", "role": "user", "text": "Replace the old product name in these eight titles", "tools": [] },
+        { "id": "a", "role": "assistant", "text": "All titles were replaced", "tools": [
+          { "id": "e1", "name": "edit", "status": "completed", "input": { "file": "docs/one.md", "old": "Old Product", "new": "New Product" }, "output": "Replaced title" },
+          { "id": "e2", "name": "edit", "status": "completed", "input": { "file": "docs/two.md", "old": "Old Product", "new": "New Product" }, "output": "Replaced title" },
+          { "id": "e3", "name": "edit", "status": "completed", "input": { "file": "docs/three.md", "old": "Old Product", "new": "New Product" }, "output": "Replaced title" },
+          { "id": "e4", "name": "edit", "status": "completed", "input": { "file": "docs/four.md", "old": "Old Product", "new": "New Product" }, "output": "Replaced title" },
+          { "id": "e5", "name": "edit", "status": "completed", "input": { "file": "docs/five.md", "old": "Old Product", "new": "New Product" }, "output": "Replaced title" },
+          { "id": "e6", "name": "edit", "status": "completed", "input": { "file": "docs/six.md", "old": "Old Product", "new": "New Product" }, "output": "Replaced title" },
+          { "id": "e7", "name": "edit", "status": "completed", "input": { "file": "docs/seven.md", "old": "Old Product", "new": "New Product" }, "output": "Replaced title" },
+          { "id": "e8", "name": "edit", "status": "completed", "input": { "file": "docs/eight.md", "old": "Old Product", "new": "New Product" }, "output": "Replaced title" },
+          { "id": "verify", "name": "shell", "status": "completed", "input": { "command": "npm run check-links" }, "output": "Link checks passed for all documents" }
+        ] }
+      ] }
+    },
+    {
+      "id": "codemode-repeated-reads",
+      "expected": "reject",
+      "rationale": "Packing repeated reads into Code Mode does not create a substantive dependency or decision.",
+      "snapshot": { "sessionId": "code-read", "terminal": "success", "messages": [
+        { "id": "u", "role": "user", "text": "Read the version repeatedly", "tools": [] },
+        { "id": "a", "role": "assistant", "text": "The version is unchanged", "tools": [
+          { "id": "batch", "name": "execute", "status": "completed", "input": { "code": "await tools.read({file:'package.json'}); await tools.read({file:'package.json'}); await tools.read({file:'package.json'}); await tools.read({file:'package.json'}); await tools.read({file:'package.json'}); await tools.read({file:'package.json'}); await tools.read({file:'package.json'}); await tools.read({file:'package.json'});" }, "output": "All reads returned version 1.0.0" },
+          { "id": "verify", "name": "shell", "status": "completed", "input": { "command": "npm pkg get version" }, "output": "Version lookup verified: 1.0.0" }
+        ] }
+      ] }
+    },
+    {
+      "id": "codemode-data-dependency",
+      "expected": "accept",
+      "rationale": "A compact execution can investigate a dependency, apply a targeted correction, and be checked independently.",
+      "snapshot": { "sessionId": "code-data", "terminal": "success", "messages": [
+        { "id": "u", "role": "user", "text": "Correct the cache key collision and validate isolation", "tools": [] },
+        { "id": "a", "role": "assistant", "text": "The cache key now includes the tenant", "tools": [
+          { "id": "batch", "name": "execute", "status": "completed", "input": { "code": "const source = await tools.read({file:'src/cache.ts'}); const samples = await tools.shell({command:'node reproduce-cache.js'}); if(samples.includes('collision')) { await tools.apply_patch({file:'src/cache.ts',patch:'include tenantId in key'}); } return {source,samples};" }, "output": "Root cause identified: src/cache.ts key depends only on invoice ID, so both tenants map to invoice:42. Reproduction confirmed the collision. Updated src/cache.ts to include tenantId in the derived key." },
+          { "id": "verify", "name": "shell", "status": "completed", "input": { "command": "node --test test/cache-isolation.test.js" }, "output": "Independent tenant-isolation regression verified: 6 tests passed; cross-tenant reads remain isolated." }
+        ] }
+      ] }
+    },
+    {
+      "id": "unfinished-operation",
+      "expected": "reject",
+      "rationale": "Useful-looking evidence cannot override a task that still has an unfinished operation.",
+      "snapshot": { "sessionId": "unfinished", "terminal": "success", "messages": [
+        { "id": "u", "role": "user", "text": "Correct the dependency and run the full regression", "tools": [] },
+        { "id": "a", "role": "assistant", "text": "Waiting for the regression", "tools": [
+          { "id": "inspect", "name": "read", "status": "completed", "input": { "file": "src/cache.ts" }, "output": "Root cause identified: key omits tenant ID" },
+          { "id": "fix", "name": "edit", "status": "completed", "input": { "file": "src/cache.ts" }, "output": "Updated cache key to include tenant ID" },
+          { "id": "verify", "name": "shell", "status": "pending", "input": { "command": "npm test" }, "output": "Running tests" }
+        ] }
+      ] }
+    }
+  ]
+}

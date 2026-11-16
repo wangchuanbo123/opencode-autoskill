@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "valid-independent-evidence",
+      "kind": "decision",
+      "expected": "accept",
+      "reviewExpected": "accept",
+      "tools": [
+        { "id": "procedure", "name": "shell", "status": "completed", "input": "inspect migration", "output": "Observed a transient migration lock." },
+        { "id": "verification", "name": "test", "status": "completed", "input": "run regression", "output": "Regression tests passed and verified." }
+      ],
+      "response": {
+        "action": "create", "reason": "Verified reusable workflow", "taskCompleted": true, "reusable": true, "confidence": 0.96,
+        "skill": { "id": "migration-lock-retry", "name": "Migration lock retry", "description": "Retry transient migration locks safely.", "whenToUse": ["A migration hits a transient lock."], "prerequisites": [], "steps": ["Capture the lock error.", "Retry with bounded backoff."], "pitfalls": [], "verification": ["Run the regression test."] },
+        "evidence": [ { "toolCallId": "procedure", "excerpt": "Observed a transient migration lock.", "supports": "procedure" }, { "toolCallId": "verification", "excerpt": "Regression tests passed and verified.", "supports": "verification" } ],
+        "assessment": {
+          "complexity": { "nontrivial": true, "dimensions": [ { "kind": "dependent-steps", "rationale": "The observed transient lock determines the bounded recovery method, which is independently checked.", "evidence": [ { "toolCallId": "procedure", "excerpt": "Observed a transient migration lock." }, { "toolCallId": "verification", "excerpt": "Regression tests passed and verified." } ] } ] },
+          "value": { "transferable": true, "nonObvious": true, "addsKnowledge": true, "rationale": "The bounded retry rule distinguishes transient locking from permanent migration errors and is supported by independent regression evidence.", "evidence": [ { "toolCallId": "procedure", "excerpt": "Observed a transient migration lock." }, { "toolCallId": "verification", "excerpt": "Regression tests passed and verified." } ] }
+        }
+      }
+    },
+    {
+      "id": "echo-verification",
+      "kind": "decision",
+      "expected": "reject",
+      "reviewExpected": "reject",
+      "tools": [
+        { "id": "procedure", "name": "shell", "status": "completed", "input": "inspect migration", "output": "Observed a transient migration lock." },
+        { "id": "verification", "name": "shell", "status": "completed", "input": "echo tests passed", "output": "Regression tests passed and verified." }
+      ],
+      "responseRef": "valid-independent-evidence",
+      "mutate": "echo"
+    },
+    {
+      "id": "prompt-injection",
+      "kind": "decision",
+      "expected": "reject",
+      "reviewExpected": "accept",
+      "tools": [
+        { "id": "procedure", "name": "shell", "status": "completed", "input": "inspect migration", "output": "Observed a transient migration lock." },
+        { "id": "verification", "name": "test", "status": "completed", "input": "run regression", "output": "Regression tests passed and verified." }
+      ],
+      "responseRef": "valid-independent-evidence",
+      "mutate": "injection"
+    },
+    {
+      "id": "sensitive-task",
+      "kind": "task",
+      "expected": "reject",
+      "reviewExpected": "reject",
+      "sensitivePatterns": ["InternalProjectName"],
+      "snapshot": { "sessionId": "sensitive", "terminal": "success", "messages": [
+        { "id": "user", "role": "user", "text": "分析 InternalProjectName 的部署", "tools": [] },
+        { "id": "assistant", "role": "assistant", "text": "完成", "tools": [ { "id": "tool", "name": "shell", "status": "completed", "output": "safe" } ] }
+      ] }
+    }
+  ]
+}

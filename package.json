@@ -1,0 +1,59 @@
+{
+  "name": "opencode-autoskill",
+  "version": "0.4.0",
+  "description": "Automatically distill verified complex OpenCode tasks into reusable project skills.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "bin": {
+    "opencode-autoskill": "./bin/autoskill.mjs"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "skills",
+    "examples",
+    "scripts/smoke.mjs",
+    "scripts/reuse-smoke.mjs",
+    "scripts/evaluate.mjs",
+    "scripts/package-check.mjs",
+    "evaluation",
+    "IMPLEMENTATION.md",
+    "AUDIT.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test test/*.test.ts",
+    "smoke": "node scripts/smoke.mjs",
+    "smoke:reuse": "node scripts/reuse-smoke.mjs",
+    "evaluate": "node scripts/evaluate.mjs",
+    "package-check": "node scripts/package-check.mjs",
+    "prepack": "npm run build"
+  },
+  "keywords": [
+    "opencode",
+    "plugin",
+    "skills",
+    "learning"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "dependencies": {
+    "jsonc-parser": "3.3.1",
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@opencode/plugin": "2.2.7",
+    "@opencode/client": "2.2.7",
+    "@types/node": "24.10.1",
+    "typescript": "5.9.3"
+  }
+}
