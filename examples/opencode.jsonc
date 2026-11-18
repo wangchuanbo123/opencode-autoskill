@@ -2,13 +2,13 @@
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
     {
-      // 改为构建后的包目录；也可运行 bin/autoskill.mjs install 自动配置。
+      // Use the built package directory, or run bin/autoskill.mjs install to configure it.
       "package": "D:/plugins/opencode-autoskill",
       "options": {
         "enabled": true,
-        "mode": "auto", // "draft" 自动提炼为候选，通过 CLI drafts publish 发布
+        "mode": "auto", // "draft" saves candidates automatically; publish with the drafts publish CLI command.
         "language": "zh-CN",
-        // 每个新任务检索；仅高相关、前提明确且通过保护检查时自动加载正文。
+        // Retrieve for each new task; automatically load bodies only when relevance, prerequisites, and protection checks pass.
         "reuseEnabled": true,
         "reuseCandidateLimit": 5,
         "reuseAutoLoadLimit": 2,
@@ -18,7 +18,7 @@
         "reuseMaxContextChars": 16000,
         "reuseMaxSkillChars": 6000,
         "reuseTimeoutMs": 5000,
-        // 所有自动候选必须有实质证据并达到评分；工具次数和失败次数不直接触发。
+        // All automatic candidates need substantive evidence and the minimum score; tool/failure counts alone do not qualify.
         "minComplexityScore": 11,
         "debounceMs": 2000,
         "cooldownMs": 60000,
@@ -36,19 +36,19 @@
         "maxManagedSkills": 100,
         "maxReviewsPerDay": 20,
         "maxGlobalReviewsPerDay": 100,
-        // 估算输入 token 预算；宿主不提供实际 usage，不能据此保证精确金额。
+        // Estimated input-token budgets; the host does not report actual usage, so these do not guarantee exact cost.
         "maxEstimatedTokensPerDay": 250000,
         "maxGlobalEstimatedTokensPerDay": 1000000,
-        "providerAllowlist": [], // 非空时只向列出的 provider 发送提炼请求
+        "providerAllowlist": [], // When nonempty, send distillation requests only to these providers.
         "excludeTools": [],
         "excludeSessions": [],
-        // 自定义数组替换配置列表；工具内置的敏感文件排除规则始终生效。
+        // A custom array replaces this configured list; built-in sensitive-file exclusions always apply.
         "excludeFiles": [".env", ".env.*", "*.pem", "*.key", "**/credentials*", "**/auth.json", "**/secrets/**"],
-        "sensitivePatterns": [], // 字面片段，至少3个字符；不解释为正则
+        "sensitivePatterns": [], // Literal fragments of at least 3 characters; not regular expressions.
         "storeEvidence": "redacted"
-        // 可选：指定复盘模型；默认沿用任务模型。
+        // Optional reviewer model; defaults to the task model.
         // ,"model": { "providerID": "your-provider", "id": "your-model" }
-        // 可选：跨项目预算目录；默认用户私有状态目录。
+        // Optional cross-project budget directory; defaults to the user-private state directory.
         // ,"globalStateDirectory": "D:/private/opencode-autoskill"
       }
     }
