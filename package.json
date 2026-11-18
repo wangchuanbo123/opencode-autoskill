@@ -34,6 +34,7 @@
     "scripts/package-check.mjs",
     "evaluation",
     "README.md",
+    "README.zh-CN.md",
     "CROSS_PLATFORM.md",
     "LICENSE"
   ],

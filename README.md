@@ -1,12 +1,59 @@
+<div align="center">
+
 # OpenCode AutoSkill
 
-An unofficial community plugin that distills completed agent tasks with verification evidence into reusable project skills, then retrieves relevant skills for later tasks. This project is not built by, affiliated with, or endorsed by the OpenCode team.
+### Turn verified task experience into reusable project skills
 
-**Compatibility:** OpenCode `>=2.2.7 <2.3.0`, Node.js `>=22.18`; tested with OpenCode **2.2.7 on Windows** using local mock models. Other supported OpenCode versions require validation. Claude Code, Codex, Gemini CLI and Cursor adapters have process/protocol tests; generic MCP provides skill search, loading and feedback, with no passive task capture. See [cross-platform setup and limits](CROSS_PLATFORM.md).
+**English** · [简体中文](README.zh-CN.md)
+
+![Version](https://img.shields.io/badge/version-0.4.0-2563eb)
+![OpenCode](https://img.shields.io/badge/OpenCode-%3E%3D2.2.7%20%3C2.3.0-2563eb)
+![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.18-43853d)
+[![License: MIT](https://img.shields.io/badge/license-MIT-22c55e)](LICENSE)
+
+Automatic review · Relevant skill retrieval · Evidence checks · Cross-platform adapters
+
+</div>
+
+> **An unofficial community plugin.** This project is not built by, affiliated with, or endorsed by the OpenCode team.
+> Integration tested on **Windows with OpenCode 2.2.7 and local mock models**. Other versions, clients and real-model quality have separate validation limits below.
+
+## Navigation
+
+[Quick start](#quick-start) · [Skill reuse](#how-automatic-reuse-works) · [Distillation](#how-automatic-distillation-works) · [Diagnostics](#status-and-diagnostics) · [Skill management](#manage-generated-skills) · [Configuration](#configuration) · [Privacy](#files-and-privacy) · [Cross-platform guide](CROSS_PLATFORM.md) · [Evaluation](evaluation/README.md)
+
+## Why AutoSkill?
+
+| Capability | What it helps you do |
+|---|---|
+| Learn from completed tasks | Save methods supported by verification evidence as project skills |
+| Retrieve for each new task | Find relevant experience using the task topic, environment and prerequisites |
+| Keep context bounded | Load up to 5 summaries and 2 complete skills by default, within character budgets |
+| Protect team knowledge | Track content hashes and versions, and preserve manual edits |
+| Use feedback carefully | Keep model usage reports, task outcomes and user ratings separate |
+| Connect multiple agents | Use a shared core, platform hooks and MCP, with explicit capability limits |
+
+AutoSkill reviews substantive tasks during normal OpenCode use. It saves reusable methods with supporting evidence, then checks whether they apply to later tasks. The workflow covers **distillation → matching → loading → use → feedback**. It runs automatically by default; no per-task confirmation or `/learn` command is required. Reuse uses the plugin API and requires no OpenCode source changes.
+
+**Compatibility:** OpenCode `>=2.2.7 <2.3.0`, Node.js `>=22.18`. Version **2.2.7** has been tested; other versions within the accepted range still require validation.
+
+**Generated language:** skills default to Simplified Chinese (`zh-CN`). To generate English skills, set `"language": "en"` in the plugin's `options`; see [configuration](#configuration). Choosing a README language does not change runtime settings.
+
+## Quick start
+
+Choose the setup for your host:
+
+| Host | Setup and capabilities |
+|---|---|
+| **OpenCode** | Native automatic review and reuse; uses the host's configured model. Follow the steps below. |
+| **Claude Code / Codex / Gemini CLI / Cursor** | Local adapters with platform hooks and a shared skill library. See [installation](CROSS_PLATFORM.md#installation) and [reviewer configuration](CROSS_PLATFORM.md#configure-the-reviewer). |
+| **Other MCP clients** | Install with `--host generic`, register the generated server entry, and use search/load on demand. See [generic MCP setup](CROSS_PLATFORM.md#connect-a-generic-mcp-client). Generic MCP does not passively capture tasks. |
+
+The other host adapters have process/protocol tests; this does not establish acceptance in every real client. Migration, native export and host-specific limits are documented in the [cross-platform guide](CROSS_PLATFORM.md).
 
 ### Install from source
 
-Configure a working model in OpenCode first. Replace `PATH_TO_YOUR_PROJECT` below with the absolute path to your project, and keep the cloned plugin directory after installation.
+Configure a working model in OpenCode first. The package is not currently published on the npm registry; install from the public source repository. Replace `PATH_TO_YOUR_PROJECT` with your project's absolute path:
 
 ```sh
 git clone https://github.com/wangchuanbo123/opencode-autoskill.git
@@ -17,105 +64,78 @@ node bin/autoskill.mjs install --project "PATH_TO_YOUR_PROJECT"
 node bin/autoskill.mjs doctor --project "PATH_TO_YOUR_PROJECT"
 ```
 
-Reload OpenCode to activate the plugin. The CLI registers this local directory in your project configuration. The package is not currently published on npm; use the source installation above. The full Chinese manual follows.
+Reload OpenCode, then work normally. Keep the cloned plugin directory: the installer registers its absolute path in your project's configuration.
 
-本项目为社区维护的非官方插件，并非由 OpenCode 团队开发，与该团队无隶属或背书关系。
-
-现在提供 **Claude Code、Codex、Gemini CLI、Cursor 和通用 MCP** 的本地适配器。共享技能库、平台 hooks、独立复盘模型、迁移与原生导出见 [跨平台使用说明](CROSS_PLATFORM.md)。原有 OpenCode 安装方式继续兼容；其他平台的实际能力及验收范围在该文档中分别列明。
-
-在你照常使用 OpenCode 时，自动复盘复杂任务，把有验证证据、可以再次使用的方法保存为项目 Skill；后续任务开始时检索相关经验，在适用条件明确时自动加载。插件覆盖“沉淀 → 匹配 → 加载 → 使用 → 反馈”的链路。
-
-v0.4 支持范围为 **OpenCode ≥2.2.7 且 <2.3.0**，已测试版本为 **2.2.7**，需要 **Node.js ≥22.18**；范围内其他版本仍需验证。默认自动运行，无需每次确认或输入 `/learn`。复用通过插件接口接入，不要求修改 OpenCode 源码。
-
-## 快速开始
-
-按使用的平台选择入口：
-
-| 平台 | 安装与诊断 |
-|---|---|
-| OpenCode | 按下方快速开始安装，使用宿主已配置的模型 |
-| Claude Code / Codex / Gemini CLI / Cursor | [跨平台安装](CROSS_PLATFORM.md#安装)，自动提炼还需[配置复盘模型](CROSS_PLATFORM.md#配置复盘模型) |
-| 其他支持 MCP 的智能体 | 安装 `--host generic`，将生成的服务条目注册到客户端，使用 search/load 按需复用，见[接入步骤](CROSS_PLATFORM.md#通用-mcp-客户端接入) |
-
-OpenCode 中应已配置可用的模型。从源码安装：
-
-```powershell
-git clone https://github.com/wangchuanbo123/opencode-autoskill.git
-cd opencode-autoskill
-npm ci
-npm run build
-node bin/autoskill.mjs install --project D:\your-project
-node bin/autoskill.mjs doctor --project D:\your-project
-```
-
-重新加载 OpenCode，然后正常执行任务。需要查看结果时：
+The remaining examples use PowerShell paths such as `D:\your-project`. Substitute your own paths. To inspect results:
 
 ```powershell
 node bin/autoskill.mjs status --runtime --project D:\your-project
 node bin/autoskill.mjs skills list --project D:\your-project
 ```
 
-安装器修改项目根目录的 `opencode.jsonc`，已有 `opencode.json` 时使用它。保留注释、其他插件及配置。两个文件同时存在时，用 `--config D:\your-project\opencode.jsonc` 选择；同时提供的 `--project` 必须是该文件所在目录。
+The installer updates `opencode.jsonc` in the project root, or `opencode.json` if that file already exists. It preserves comments, other plugins and configuration. If both files exist, select one with `--config D:\your-project\opencode.jsonc`; any accompanying `--project` must name that file's directory.
 
-插件路径写为当前安装包的绝对目录，该目录需要保留。通过 npm 安装打包产物后，也可用 `opencode-autoskill` 代替 `node bin/autoskill.mjs`：
+### Install a local package archive
+
+If you have built a `.tgz`, install it with npm and run its CLI:
 
 ```powershell
 npm install --prefix D:\plugins\autoskill-host D:\downloads\opencode-autoskill-0.4.0.tgz
 node D:\plugins\autoskill-host\node_modules\opencode-autoskill\bin\autoskill.mjs install --project D:\your-project
 ```
 
-直接解压 `.tgz` 时，还需在解压的 `package/` 目录执行 `npm install --omit=dev --ignore-scripts`，安装运行依赖。
+When its executable is on your `PATH`, `opencode-autoskill` can replace `node bin/autoskill.mjs`. The installed directory must remain available. If you extract a `.tgz` directly, run `npm install --omit=dev --ignore-scripts` in the extracted `package/` directory to install runtime dependencies.
 
-## 自动复用怎样工作
+## How automatic reuse works
 
 ```text
-新用户任务开始
-  → 从当前项目检索仍由插件管理的技能
-  → 检查内容哈希、适用前提、技术栈、版本、时效和反馈
-  → 排序、去重，保留最多 5 个候选摘要
-  → 对高相关且前提明确的候选，自动加载最多 2 个完整技能
-  → 其余候选由主模型判断，必要时通过 autoskill_load 加载
-  → 模型结合本次任务使用方法并验证结果
-  → 记录加载、模型报告、任务结果及用户反馈
+A new user task starts
+  → Retrieve skills still managed by the plugin in this project
+  → Check hashes, prerequisites, stack, versions, age and feedback
+  → Rank and deduplicate up to 5 candidate summaries
+  → Automatically load up to 2 highly relevant skills with known prerequisites
+  → Let the main model assess other candidates and call autoskill_load if needed
+  → Apply the method to the current task and verify the result
+  → Record loading, model reports, task outcomes and user feedback
 ```
 
-每个新任务都会尝试本地检索，不另开一次模型请求进行匹配。按用户消息 ID 关联候选和本次加载，防止把上一个任务的匹配结果套用到新的请求。任务没有相关技能时照常执行；检索失败或超时不会阻止主任务。
+Each new task attempts local retrieval without a separate model request for matching. Candidates and loads are associated with the user message ID so a previous task's matches are not applied to a new request. Tasks with no relevant skill proceed normally; retrieval failures and timeouts do not block the main task.
 
-OpenCode 复用失败日志提供 `hook` 阶段、固定 `reason` 类别和 `elapsedMs` 耗时，帮助区分超时、锁竞争和文件访问问题；日志不包含异常原文、任务文字或文件路径。
+OpenCode reuse failure logs include the `hook` stage, a fixed `reason` category and `elapsedMs`, helping distinguish timeouts, lock contention and file access failures. They omit raw exception text, task text and file paths.
 
-宿主接入使用 `session.hook("prompt")` 在用户输入接收时准备检索，使用 `session.hook("context")` 在主模型调用前为当前用户消息重建复用上下文；排队的新输入也有独立任务关联。插件不改写用户消息或显式技能附件，复用上下文随主任务提供；子会话和不在当前项目范围内的任务不进入这条自动链路。
+The host adapter uses `session.hook("prompt")` to prepare retrieval when input arrives and `session.hook("context")` to rebuild reuse context for the current user message before the main model call. Queued input also has its own task association. The plugin preserves user messages and explicit skill attachments and supplies reuse context alongside the main task. Child sessions and tasks outside the current project are excluded from this automatic path.
 
-### 如何控制技能过多和选错？
+### Bound context and avoid unsuitable skills
 
-本地检索结合任务中的具体主题、技能标题/适用场景，以及观测到的项目环境。泛化的“修复、检查、运行测试”不能单独触发某个领域技能；中文技术术语参与检索。当前实现使用关键词、有限技术术语映射和明确条件检查，不使用向量数据库，也不宣称能识别所有语义等价问题。
+Local retrieval combines specific task topics, skill titles and use cases, and the observed project environment. Generic requests such as “fix,” “inspect,” or “run tests” cannot trigger a domain skill on their own. Chinese technical terms participate in retrieval. The implementation uses keywords, a limited technical-term mapping and explicit condition checks. It has no vector database and does not claim to recognize every semantically equivalent problem.
 
-候选摘要与完整正文分别控制数量和字符预算。默认最多 **5 个候选、2 个完整技能**；只选中后才把正文加入本次任务上下文，避免把全部正文发送给模型。候选摘要只包含标题、描述、评分及原因，状态记录保留技能哈希与版本以便核对。
+Candidate summaries and complete bodies have separate count and character budgets. Defaults are **5 candidates and 2 complete skills**. A body enters the current task's context only after selection. Summaries contain only a title, description, score and reasons; status records retain skill hashes and versions for inspection.
 
-`reuseAutoLoadLimit` 可设为 `0～2`，控制自动加载数量；单个任务含显式选择在内总共最多加载 2 个技能。默认单个技能正文不超过 6000 字符、整个复用上下文不超过 16000 字符。放不下完整步骤和验证的技能仅保留摘要，不把正文截到一半后提供给模型。
+`reuseAutoLoadLimit` accepts `0–2`. A task can load at most 2 skills in total, including explicit selections. The default body limit is 6,000 characters per skill and the overall reuse-context limit is 16,000 characters. If the complete procedure and verification do not fit, the candidate remains a summary; the plugin does not supply a body cut off halfway through.
 
-以下情况会排除自动复用：归档、归属哈希不匹配、人工修改、明确环境/运行版本不适配、过期、连续负反馈、敏感内容或不完整正文。默认超过 **180 天**的旧版本不进入本轮候选；这表示需要重新核验，不会因此删除文件。固定 `pin` 的技能仍可复用；固定仅保护其更新和清理。
+Automatic reuse excludes archived skills, ownership-hash mismatches, manual edits, explicit environment or runtime-version conflicts, stale versions, repeated negative feedback, sensitive content and incomplete bodies. By default, versions older than **180 days** are excluded from the current candidates; they need revalidation and are not deleted. Pinned skills remain eligible for reuse: pinning protects updates and cleanup only.
 
-只有明确满足的前提才支持自动加载。无法从当前项目证实的前提会把候选降为“需判断”，例如技能要求可复现的故障夹具，而当前仅在任务描述里提到它。已知前端框架、运行时版本或平台冲突会排除候选。环境识别和文本条件解析仍有边界，主模型应在执行前检查实际约束。
+Automatic loading requires explicitly satisfied prerequisites. A prerequisite that cannot be established from the current project downgrades the candidate to “needs assessment.” For example, a skill may require a reproducible failure fixture that is only mentioned in the task description. Known framework, runtime-version or platform conflicts exclude candidates. Environment detection and textual condition parsing have limits; the main model must check actual constraints before execution.
 
-项目环境探测只读取受限大小的项目清单和已知标记文件，不运行探测命令、不扫描用户目录。插件自身运行时版本不会自动当作项目子进程的版本；无法证实版本要求时，候选交给模型进一步核实。
+Environment detection reads only size-limited project manifests and known marker files. It does not run probing commands or scan user directories. The plugin's own runtime version is not automatically treated as a project subprocess version. When a version requirement cannot be established, the model must verify it.
 
-重复方法只保留一个候选；相近主题但方法存在冲突时，降低为需要模型判断的候选，避免同时自动加载互斥步骤。历史成功反馈只参与小幅排序，不能让无关技能越过匹配或环境门槛。这里的评分是路由启发式，**不是技能适用概率或成功率**。
+Duplicate methods produce one candidate. Similar topics with conflicting methods are downgraded for model assessment to avoid automatically loading mutually exclusive procedures. Historical success feedback makes only a small ranking adjustment; it cannot let an unrelated skill bypass matching or environment checks. Scores are routing heuristics, **not probabilities of applicability or success**.
 
-### 自动加载与实际使用
+### Loading and actual use
 
-高相关且条件明确时，插件会把完整技能作为本次任务的参考上下文并要求优先采用。用户当前要求、项目限制和权限继续生效；用户明确不使用技能时退出自动复用，针对某个主题的排除只影响该主题。
+For a highly relevant skill with clear prerequisites, the plugin supplies the full body as reference context and asks the model to prefer it. Current user instructions, project constraints and permissions still apply. An explicit request not to use skills disables automatic reuse; exclusions for a particular topic affect only that topic.
 
-插件不会在加载时直接运行 Skill 中的命令。完整加载只证明内容已提供给模型；模型是否实际采用、方法是否造成任务成功，需要结合使用报告、执行证据及用户反馈判断。主模型仍可因新的事实发现技能不适用，并说明原因。
+Loading a skill does not execute its commands. A complete load proves only that the content was supplied to the model. Actual adoption and whether the method contributed to success require usage reports, execution evidence and user feedback. New facts may still make a skill unsuitable; the main model should explain that decision.
 
-当前自动复用只针对**内容哈希与私有来源一致的插件生成技能**。已有手写、外部和人工修改的技能保留其原生发现方式；插件不改写这些正文，也不把它们纳入自动管理。若需要重新接管人工修改后的技能，先检查正文再显式 `skills adopt`。
+Automatic reuse currently covers only **plugin-generated skills whose content hashes match their private provenance records**. Handwritten, external and manually edited skills retain native discovery. The plugin neither rewrites those bodies nor manages them automatically. To return a manually edited skill to plugin management, inspect it first and explicitly run `skills adopt`.
 
-### 反馈与治理
+### Feedback and governance
 
-加载次数、模型自报是否使用、任务的成功/失败/中断结果，以及用户显式反馈分别记录。任务成功与技能有效之间没有必然因果关系；模型的 `autoskill_feedback` 是使用报告，不冒充用户评价。
+Load counts, model-reported use, task success/failure/interruption and explicit user feedback are recorded separately. Task success does not establish that a skill was effective. The model's `autoskill_feedback` report is not a user rating.
 
-反馈用于降低低价值候选的排序或停止其自动推荐。已有 `skills pin/archive/restore/rollback/prune` 可管理技能和保留版本；相近方法的自动检索去重不会直接重写或合并正文。重新提炼时仍需通过已验证改进、所有权和版本检查。
+Feedback can lower low-value candidates' rankings or stop their automatic recommendation. `skills pin/archive/restore/rollback/prune` manages skills and retained versions. Retrieval deduplication does not directly rewrite or merge similar bodies. A new distillation still needs verified improvement, ownership checks and version checks.
 
-查看复用状态、按版本统计和任务关联信息：
+Inspect reuse status, version-level statistics and task associations:
 
 ```powershell
 node bin/autoskill.mjs reuse status --project D:\your-project
@@ -123,17 +143,17 @@ node bin/autoskill.mjs reuse history --project D:\your-project
 node bin/autoskill.mjs reuse history <skill-id> --project D:\your-project
 ```
 
-用户对一次实际使用记录反馈时，指定状态中对应的会话和用户消息 ID：
+To rate an actual usage record, specify the session and user message IDs shown in status:
 
 ```powershell
 node bin/autoskill.mjs reuse feedback <skill-id> --session <session-id> --task <user-message-id> --outcome success --project D:\your-project
 ```
 
-`--outcome` 支持 `success`、`failure`、`unknown`。反馈标为 `source: "user"`，关联当时实际加载的技能哈希；改版前的反馈不会算到新版正文。对同一用户消息的编辑产生多个检索版本时，可用 `--query-hash <hash>` 精确选择。模型工具不能写入用户来源的评价。
+`--outcome` accepts `success`, `failure` or `unknown`. Feedback has `source: "user"` and is associated with the hash actually loaded at that time. Feedback on an older body does not count toward its replacement. If edits to one user message produced multiple retrieval revisions, select one with `--query-hash <hash>`. Model tools cannot write user-sourced ratings.
 
-旧 `skills feedback` 仍可记录技能总体反馈，并保留当前正文版本的反馈供检索参考。新任务级 `reuse feedback` 写入独立账本，不再同时累加旧计数，避免一次评价被计算两次。
+The older `skills feedback` command still records overall skill feedback and retains feedback on the current body version for retrieval. Task-level `reuse feedback` writes to a separate ledger without also incrementing the older counter, preventing double counting.
 
-治理默认只输出建议，可先预览：
+Governance returns recommendations by default. Preview before applying:
 
 ```powershell
 node bin/autoskill.mjs reuse govern --project D:\your-project
@@ -141,57 +161,57 @@ node bin/autoskill.mjs reuse govern --apply --dry-run --project D:\your-project
 node bin/autoskill.mjs reuse govern --apply --project D:\your-project
 ```
 
-治理建议基于当前版本的用户反馈和时效；不会把模型自报或任务失败直接当成技能失败。应用归档前再次核对受管归属、内容哈希和固定状态，归档后仍可 `skills restore`。重复覆盖只给出保留主技能的建议，当前不会自动改写、拼接或合并正文。
+Recommendations use user feedback on the current version and its age. A model report or failed task is not automatically treated as skill failure. Before archiving, the plugin rechecks managed ownership, content hash and pin status. Archived skills can be restored with `skills restore`. Overlapping coverage produces a recommendation to retain a primary skill; bodies are not automatically rewritten, concatenated or merged.
 
-## 自动提炼怎样工作
+## How automatic distillation works
 
 ```text
-OpenCode 完成一轮执行
-  → 按用户任务边界切分，保留尚未处理的证据
-  → 保存经过排除、脱敏和截断的任务证据，加入持久队列
-  → 根据依赖、诊断、协调与独立核验等证据初筛
-  → 预留项目和用户级调用预算，选择相关的已有 Skills
-  → 模型分别评估实质复杂性与方法的沉淀价值
-  → 检查完成状态、结构化评估、质量和证据引用
-  → 自动新建/更新 SKILL.md，或保存为候选
-  → 刷新技能列表，记录决定和原因
+OpenCode finishes an execution turn
+  → Split evidence at user-task boundaries and retain unprocessed evidence
+  → Filter, redact and truncate task evidence; add it to the persistent queue
+  → Screen for dependencies, diagnosis, coordination and independent verification
+  → Reserve project/user call budgets and select relevant existing skills
+  → Ask the model to assess substantive complexity and reusable value separately
+  → Check completion, structured assessments, quality and evidence references
+  → Create/update SKILL.md automatically, or save a draft
+  → Refresh the skill list and record the decision and reasons
 ```
 
-单个任务即可生成 Skill，是否送审与是否发布分别判断。v0.3 移除了“8 次调用，或 4 次且失败过就入选”的通道。读取很多文件、重复相同命令、拼写错误后重试，以及批量执行相同替换，都不能仅凭次数被认定为复杂任务。
+One task can produce a skill. Review eligibility and publication are separate decisions. Version 0.3 removed the shortcut that admitted tasks after “8 calls, or 4 calls with a failure.” Reading many files, repeating commands, retrying after typos or making the same replacement in bulk is not substantive complexity by count alone.
 
-### 如何界定复杂与值得沉淀？
+### Assess complexity and reusable value
 
-| 判断层 | 看什么 | 不足以作为依据的信号 |
+| Decision layer | Required signals | Insufficient signals |
 |---|---|---|
-| 确定性初筛：是否值得花一次模型调用 | 工具证据中的非机械步骤依赖、诊断与方法调整、有关联的跨资源协调、调查结论与独立核验；必须完成并有足够有效证据 | 调用数、文件数、失败数、用户说“复杂”、助手声称已完成 |
-| 模型评估复杂性 | 解释哪里需要判断、为什么步骤相互依赖或原方法失败，并引用实际工具证据 | 重复列举操作，或只复述分数与工具名 |
-| 模型评估沉淀价值 | 可迁移的触发条件、可执行且有验证的方法、对已有技能的新增覆盖 | 内容很长、一次性项目细节、自报高置信度、与已有技能重复 |
+| Deterministic screening: is a model review worthwhile? | Nonmechanical step dependencies, diagnosis and method changes, related coordination across resources, or investigative findings with independent checks; completed work and enough valid evidence are required | Call/file/failure counts, a user's “complex” label, or an assistant's completion claim |
+| Model complexity assessment | Explain where judgment was needed, why steps depended on one another or why the original method failed; cite actual tool evidence | Listing operations again or repeating scores and tool names |
+| Model reusable-value assessment | Transferable triggers, executable verified methods, and additional coverage beyond existing skills | Length, one-off project details, self-reported confidence, or duplicate methods |
 
-初筛对相同操作去重。Code Mode 会分析内部操作，但单纯堆叠 `await read(...)` 不会获得实质复杂性。两次工具调用如果包含具体根因诊断和独立回归验证，也可能进入模型复盘。复杂的只读调查可通过独立来源核验入选。多任务会话仍按任务边界处理。
+Screening deduplicates equivalent operations. Code Mode inspects internal operations, but simply stacking `await read(...)` calls adds no substantive complexity. Two tool calls can qualify if they include a concrete root-cause diagnosis and independent regression verification. Complex read-only investigations may qualify through independent sources. Sessions with multiple tasks are still split at task boundaries.
 
-当前初筛策略为 `evidence-v1`。必须有至少两条去重后的有效成功工具证据，以及后续独立工具调用对同一问题的核验；还需出现依赖闭环、诊断后调整方法、跨资源协调或调查核验中的至少一种。各维度可累加：
+The current screening strategy is `evidence-v1`. It requires at least two deduplicated, valid, successful tool-evidence items and a later independent tool call verifying the same issue. It also requires at least one of: a completed dependency chain, a method change after diagnosis, related coordination across resources, or verification of investigative findings. Dimensions are additive:
 
-| 证据维度 | 分值 |
+| Evidence dimension | Points |
 |---|---:|
-| 检查 → 有关联的改动 → 后续独立验证 | 5 |
-| 非机械失败 → 根因诊断 → 调整方法 → 独立验证 | 6 |
-| 明确关联的跨资源协调 | 4 |
-| 只读调查结论 → 后续独立核验 | 5 |
-| 工具输出中的因果、依赖或比较判断 | 3 |
-| 成功的验证证据 | 2 |
-| 检查、改动、验证中包含至少两类操作 | 1 |
+| Inspection → related change → later independent verification | 5 |
+| Nonmechanical failure → root-cause diagnosis → method change → independent verification | 6 |
+| Explicitly related coordination across resources | 4 |
+| Read-only finding → later independent verification | 5 |
+| Causal, dependency or comparative reasoning in tool output | 3 |
+| Successful verification evidence | 2 |
+| At least two of inspection, change and verification | 1 |
 
-默认总分至少 `11`。分数用于调节送审成本；即使调低阈值，重复次数和普通重试也不能绕过上述实质证据要求。它不是对任务难度的测量，也不是成功概率。
+The default minimum total is `11`. The score controls review cost. Lowering it does not let repeated operations or ordinary retries bypass the substantive-evidence requirements. It is neither a measurement of difficulty nor a probability of success.
 
-初筛属于可解释的保守规则，目的是减少无效复盘，不能证明真实语义复杂性。模型必须分别提供复杂性与沉淀价值的结构化说明及可核对证据；发布前检查这些说明、引用、验证和已有技能关系。规则分数和模型评估都可能误判，不能据此宣称生成技能必然正确或有用。
+Screening is an explainable, conservative heuristic intended to reduce unhelpful reviews; it cannot establish semantic complexity. The model must provide separate structured assessments of complexity and reusable value with checkable evidence. Publication checks those assessments, references, verification and relationships to existing skills. Both rules and models can misjudge; generated skills are not guaranteed to be correct or useful.
 
-完成事件仅触发检查。模型仍需判断任务是否完成，并引用任务内可核对的验证证据。插件检查格式、引用和候选质量，不会重新执行生成内容中的验证步骤。实际提炼质量与复用效果需要持续观察。
+A completion event only triggers inspection. The model must still assess task completion and cite checkable verification within the task. The plugin checks structure, references and candidate quality; it does not rerun the generated verification steps. Actual distillation quality and reuse effectiveness require ongoing observation.
 
-后台任务使用 SQLite 持久队列，短事务领取任务，在数据库事务外调用模型。可重试失败会按退避时间重试；重启后恢复中断任务。多个会话依次处理，并发进程通过数据库协调。写入采用版本检查与原子替换，发布中断后可核对状态。
+Background work uses a persistent SQLite queue. Short transactions claim jobs; model calls run outside database transactions. Retryable failures use backoff, and interrupted work resumes after restart. Sessions are processed in sequence, while concurrent processes coordinate through the database. Writes use version checks and atomic replacement so interrupted publication can be reconciled.
 
-**OpenCode 退出后没有独立守护进程继续提炼。** 已入队任务保留，下次启动同一项目时恢复。立即退出的 `opencode run` 可能来不及采集完成证据；需要稳定自动提炼时，使用交互式 OpenCode 或持续运行的 `opencode serve`。
+**There is no separate daemon that continues distillation after OpenCode exits.** Queued tasks remain and resume when the same project starts again. A short-lived `opencode run` may exit before completion evidence is captured. Use interactive OpenCode or a persistent `opencode serve` for reliable automatic capture and review.
 
-## 查看状态和诊断
+## Status and diagnostics
 
 ```powershell
 node bin/autoskill.mjs status --runtime --project D:\your-project
@@ -201,23 +221,25 @@ node bin/autoskill.mjs recover --dry-run --project D:\your-project
 node bin/autoskill.mjs recover --project D:\your-project
 ```
 
-`status` 查看配置安装状态；`--runtime` 增加队列计数、任务摘要、最近决定、原因代码、计数指标及已观测的宿主能力。任务摘要中的 `preScreen` 显示初筛策略版本、分数、维度与拒绝原因，便于核对为何送审或跳过。未运行过的项目显示 `not-started`。输出不包含队列中的会话证据正文。
+`status` shows configuration and installation state. `--runtime` adds queue counts, task summaries, recent decisions, reason codes, counters and observed host capabilities. A task's `preScreen` includes the screening strategy version, score, dimensions and rejection reasons. Projects never run show `not-started`. Output does not include queued conversation-evidence bodies.
 
-`doctor` 检查配置、未知或非法选项、丢失的本地插件引用、模块子进程导入和 CLI 版本，并提示全局作用域是否也启用了插件。`OPENCODE_BIN` 可指定 CLI。仅 **2.2.7** 被标为已测试；其他版本需要重新验证。模块成功导入与实际宿主激活分别展示，宿主能力以运行记录为准。
+`doctor` checks configuration, unknown or invalid options, missing local plugin references, module import in a subprocess and the CLI version. It also reports whether the plugin is enabled globally. Set `OPENCODE_BIN` to choose the CLI. Only **2.2.7** is marked tested; other versions require validation. Successful module import and actual host activation are shown separately; capability reporting is based on runtime observations.
 
-`recover` 恢复失效执行租约，不通过直接删除锁文件实现。正在执行且租约有效的任务保持运行。v0.1 的旧状态会迁移；明确已死亡的旧进程锁会留作诊断记录。损坏或无法判定的旧锁需要检查状态文件，避免误认另一个仍在运行的实例。
+`recover` reclaims expired execution leases instead of simply deleting lock files. Running jobs with valid leases remain active. Old v0.1 state is migrated; locks belonging to confirmed dead legacy processes are retained as diagnostic records. Corrupt or indeterminate legacy locks require inspection to avoid confusing them with a live instance.
 
-OpenCode 中也可调用：
+The following model tools are also available in OpenCode:
 
-- `autoskill_status`：查看运行状态。
-- `autoskill_review`：复盘最近完成边界以前、尚未处理的任务；`dryRun=true` 预览候选而不发布 Skill。
-- `autoskill_load`：在当前任务的候选中按需加载技能，并再次核对归属、版本和预算。
-- `autoskill_search`：根据当前任务或补充的具体问题检索候选摘要，默认最多 5 个；继续遵守原任务的技能排除要求。
-- `autoskill_feedback`：模型报告当前任务是否使用该技能及结果；与用户显式反馈分开保存。
+| Tool | Purpose |
+|---|---|
+| `autoskill_status` | Inspect runtime state |
+| `autoskill_review` | Review unprocessed tasks before the latest completion boundary; `dryRun=true` saves candidates without publishing a skill |
+| `autoskill_load` | Load a candidate for the current task on demand, rechecking ownership, version and budgets |
+| `autoskill_search` | Retrieve candidate summaries for the current task or a specific follow-up question; up to 5 by default, respecting the task's skill exclusions |
+| `autoskill_feedback` | Report whether the model used a skill and the result; stored separately from explicit user feedback |
 
-这些是模型工具，不是斜杠命令。普通使用无需手动触发。
+These are model tools, not slash commands. Normal use needs no manual trigger.
 
-## 管理生成的 Skills
+## Manage generated skills
 
 ```powershell
 node bin/autoskill.mjs skills list --project D:\your-project
@@ -226,25 +248,25 @@ node bin/autoskill.mjs skills pin <skill-id> --project D:\your-project
 node bin/autoskill.mjs skills unpin <skill-id> --project D:\your-project
 node bin/autoskill.mjs skills archive <skill-id> --project D:\your-project
 node bin/autoskill.mjs skills restore <skill-id> --project D:\your-project
-node bin/autoskill.mjs skills rollback <skill-id> --version <版本> --project D:\your-project
+node bin/autoskill.mjs skills rollback <skill-id> --version <version> --project D:\your-project
 node bin/autoskill.mjs skills adopt <skill-id> --project D:\your-project
-node bin/autoskill.mjs skills feedback <skill-id> --outcome success --notes "实际复用成功" --project D:\your-project
+node bin/autoskill.mjs skills feedback <skill-id> --outcome success --notes "Successfully reused in practice" --project D:\your-project
 node bin/autoskill.mjs skills prune --keep 50 --older-than 30 --dry-run --project D:\your-project
 ```
 
-`list` 返回摘要，`inspect` 展示正文、来源和可回滚版本。上述子命令也可直接使用，例如 `opencode-autoskill pin <skill-id>`。
+`list` returns summaries; `inspect` shows the body, provenance and available rollback versions. These subcommands are also available directly, for example `opencode-autoskill pin <skill-id>`.
 
-- **人工修改保护**：通过内容 hash 检测修改。自动更新只作用于仍由插件管理、未固定的 Skill。手写和已人工修改的正文不会自动覆盖。
-- **固定**：`pin` 阻止自动更新与清理，`unpin` 解除固定。
-- **归档/恢复**：`archive` 从活跃技能目录移出；`restore` 可恢复归档。`rollback` 恢复 `inspect` 列出的历史版本，不会默默覆盖人工修改。
-- **重新接管**：`adopt` 明确将当前正文交回插件管理；先检查正文，后续自动更新将以它为基线。
-- **反馈/清理**：记录成功或失败反馈；`prune` 仅归档未固定、仍受管理的旧技能。先保留最近使用的 `--keep` 个，再应用 `--older-than`。默认保留 50 个。
+- **Manual-edit protection:** content hashes detect changes. Automatic updates affect only managed, unpinned skills. Handwritten and manually edited bodies are not overwritten automatically.
+- **Pinning:** `pin` blocks automatic updates and cleanup; `unpin` removes that protection.
+- **Archive and restore:** `archive` removes a skill from the active skill directory; `restore` brings it back. `rollback` restores a historical version listed by `inspect` without silently overwriting manual edits.
+- **Adoption:** `adopt` explicitly returns the current body to plugin management. Inspect it first; later automatic updates use it as the baseline.
+- **Feedback and cleanup:** record success or failure. `prune` archives only old, managed, unpinned skills. It first retains the `--keep` most recently used skills, then applies `--older-than`. The default is 50 retained skills.
 
-修改命令支持 `--dry-run` 预览。技能容量由 `maxManagedSkills` 限制，不会自动删除手写技能。
+Mutation commands support `--dry-run`. `maxManagedSkills` limits managed capacity; handwritten skills are never deleted automatically.
 
-## 候选模式
+## Draft mode
 
-配置 `"mode": "draft"` 后，仍自动筛选和提炼，候选保存在私有运行目录，发布时不再调用模型：
+With `"mode": "draft"`, screening and distillation still run automatically. Drafts are saved in the private runtime directory. Publishing an existing draft does not call the model again:
 
 ```powershell
 node bin/autoskill.mjs drafts list --project D:\your-project
@@ -254,90 +276,90 @@ node bin/autoskill.mjs drafts publish <draft-id> --project D:\your-project
 node bin/autoskill.mjs drafts discard <draft-id> --project D:\your-project
 ```
 
-发布时重新检查引用、质量与当前技能版本。正文已变更或目标已被固定时拒绝覆盖，候选保留供检查。默认 `mode: "auto"`，无需逐次发布。
+Publication rechecks references, quality and the current skill version. A changed body or newly pinned target blocks overwrite; the draft remains available for inspection. The default is `mode: "auto"`, with no per-draft publication step.
 
-### 升级到 v0.3
+### Upgrade to v0.3
 
-既有已发布 Skill 保留，不会因初筛策略版本变化而重复提炼。旧版因复杂度不足被跳过的任务，在下一次检查时可按新策略重新评估；尚未执行的队列任务也使用新规则。
+Existing published skills remain and are not distilled again merely because the screening strategy version changes. Tasks previously skipped for insufficient complexity can be reassessed under the new strategy at the next check. Queued jobs not yet executed also use the new rules.
 
-旧候选如果缺少 v0.3 要求的结构化复杂性与价值评估，不能直接发布。恢复记录显示 `legacy_draft_requires_review`；先用 `drafts inspect` 查看，需清理时用 `drafts discard`。要生成合规候选，需要在 OpenCode 中完成新的任务并通过当前复盘；没有把旧草稿直接补审或强制发布的命令。
+Legacy drafts lacking the structured complexity and value assessments required by v0.3 cannot be published directly. Recovery reports `legacy_draft_requires_review`. Inspect them with `drafts inspect`, or remove them with `drafts discard`. A compliant replacement requires a new completed task in OpenCode that passes the current review. There is no command to retrofit a review onto an old draft or force its publication.
 
-## 文件和隐私
+## Files and privacy
 
 ```text
-你的项目/
+your-project/
 └─ .opencode/
-   ├─ skills/<skill-id>/SKILL.md      # 可提交给团队的技能正文
-   └─ autoskill/                    # 自动忽略的私有运行目录
-      ├─ runtime.sqlite             # 队列权威状态
-      ├─ reuse.sqlite               # 复用任务/技能版本阶段、模型报告、用户反馈
-      ├─ state.json                 # 不含会话正文的诊断投影
-      ├─ events.jsonl               # 事件和决定记录
-      ├─ provenance/<id>/SOURCE.json # 来源、指纹和证据引用
-      ├─ drafts/                    # 未发布候选
-      └─ backups/                   # 技能历史版本
+   ├─ skills/<skill-id>/SKILL.md      # Skill body that can be shared with your team
+   └─ autoskill/                    # Automatically ignored private runtime directory
+      ├─ runtime.sqlite             # Authoritative queue state
+      ├─ reuse.sqlite               # Task/skill-version stages, model reports, user feedback
+      ├─ state.json                 # Diagnostic projection without conversation bodies
+      ├─ events.jsonl               # Events and decisions
+      ├─ provenance/<id>/SOURCE.json # Provenance, fingerprints and evidence references
+      ├─ drafts/                    # Unpublished drafts
+      └─ backups/                   # Historical skill versions
 
-用户私有状态目录/
-├─ config-backups/<配置路径hash>/   # 每份配置最近10个备份
-├─ installations/                  # 安装身份记录，用于路径迁移
-└─ …                               # 跨项目调用预算
+user-private-state/
+├─ config-backups/<config-path-hash>/ # Latest 10 backups per configuration file
+├─ installations/                   # Installation identities for path migration
+└─ …                                # Cross-project call budgets
 ```
 
-项目运行目录和用户私有状态目录自动添加忽略规则。生成的 `SKILL.md` 不携带完整来源证据；旧版技能旁的来源记录会安全迁移到私有目录。技能正文是否提交由团队决定。
+Ignore rules are added automatically for project runtime and user-private state directories. Generated `SKILL.md` files do not carry full source evidence. Legacy provenance records beside skills are safely migrated into the private directory. Your team decides whether to commit skill bodies.
 
-复用账本只保存任务/技能 ID、查询哈希、技能内容哈希、阶段和反馈统计，不保存用户任务原文或完整技能正文。近期详细阶段记录会压缩，保留去重与按版本累计所需的信息。
+The reuse ledger stores only task/skill IDs, query hashes, skill-content hashes, stages and feedback statistics. It does not store original user-task text or complete skill bodies. Recent detailed stages are compacted while retaining information needed for deduplication and per-version totals.
 
-用户私有状态目录默认是 `$XDG_STATE_HOME/opencode-autoskill`，未设置时为 `~/.local/state/opencode-autoskill`。`AUTOSKILL_STATE_HOME` 可覆盖它。配置备份可能包含凭证，因此保存在该目录，按配置路径隔离，每份配置最多保留 10 份。不要将状态目录配置为项目根目录或项目的父目录。
+The default user-private state directory is `$XDG_STATE_HOME/opencode-autoskill`, or `~/.local/state/opencode-autoskill` when unset. Override it with `AUTOSKILL_STATE_HOME`. Configuration backups may contain credentials, so they are stored there, isolated by configuration path and limited to 10 per file. Do not set the state directory to the project root or an ancestor of the project.
 
-提炼请求会将会话摘要和工具证据发送给选定的模型 provider，并消耗额度。可设置 provider 允许名单、文件/工具/会话排除及自定义敏感文字片段；输入和候选正文均做常见密钥脱敏。`storeEvidence: "none"` 可不保留来源中的证据摘录。脱敏不是对任意私人内容的识别保证。
+Distillation sends conversation summaries and tool evidence to the selected model provider and consumes quota. You can configure a provider allowlist, file/tool/session exclusions and literal sensitive-text fragments. Both input and candidate bodies undergo common-key redaction. `storeEvidence: "none"` omits evidence excerpts from provenance. Redaction cannot guarantee recognition of arbitrary private content.
 
-可清理已终结任务的旧证据，默认保留 30 天，先预览再执行：
+Old evidence from terminal jobs can be cleaned up. The default retention period is 30 days; preview first:
 
 ```powershell
 node bin/autoskill.mjs clean --older-than 30 --dry-run --project D:\your-project
 node bin/autoskill.mjs clean --older-than 30 --project D:\your-project
 ```
 
-`clean` 清除符合时间条件的已终结任务快照、来源/备份中的证据摘录，以及已发布或丢弃候选的证据。保留待执行任务、未发布候选、技能正文、内容 hash、归属和去重记录。不要通过删除整个运行目录清理证据，否则会丢失人工修改保护所需的来源信息与去重记录。
+`clean` removes age-eligible terminal task snapshots, evidence excerpts in provenance/backups, and evidence from published or discarded drafts. It preserves pending jobs, unpublished drafts, skill bodies, content hashes, ownership and deduplication records. Do not delete the entire runtime directory to clean evidence: doing so loses provenance needed for manual-edit protection and deduplication.
 
-## 配置
+## Configuration
 
-编辑 `plugins` 中本插件的 `options`，完整例子见 [examples/opencode.jsonc](examples/opencode.jsonc)。未知字段和非法值会明确报错，避免拼错后静默失效。
+Edit this plugin's `options` entry in `plugins`. See the complete [example configuration](examples/opencode.jsonc). Unknown fields and invalid values produce explicit errors instead of silently ignoring typos.
 
-| 选项 | 默认值 | 作用 |
+| Option | Default | Purpose |
 |---|---|---|
-| `enabled` / `mode` | `true` / `"auto"` | 自动运行开关；`"draft"` 仅生成候选 |
-| `reuseEnabled` | `true` | 新任务的自动检索、匹配与上下文加载开关 |
-| `reuseCandidateLimit` / `reuseAutoLoadLimit` | `5` / `2` | 本轮候选摘要数/自动加载完整技能数上限 |
-| `reuseMinScore` / `reuseAutoLoadScore` | `0.16` / `0.62` | 候选/自动加载的本地相关性阈值；仍需通过约束、冲突和安全检查 |
-| `reuseStaleAfterDays` | `180` | 超过该时间的旧版本停止自动推荐；不删除技能正文 |
-| `reuseMaxContextChars` / `reuseMaxSkillChars` | `16000` / `6000` | 单任务复用上下文/单个完整技能的字符预算 |
-| `reuseTimeoutMs` | `5000` | 单次复用准备超时；失败时主任务继续 |
-| `minToolCalls` / `minToolCallsWithErrors` | `8` / `4` | 已弃用的兼容参数；保留旧配置解析，不再使任务入选 |
-| `minComplexityScore` | `11` | 所有自动初筛候选均需达到的证据评分；仍必须满足实质信号与验证要求 |
-| `debounceMs` / `cooldownMs` | `2000` / `60000` | 事件稳定等待/同会话复盘间隔 |
-| `maxReviewsPerDay` / `maxGlobalReviewsPerDay` | `20` / `100` | 项目/用户级每日模型调用次数上限 |
-| `maxEstimatedTokensPerDay` / `maxGlobalEstimatedTokensPerDay` | `250000` / `1000000` | 项目/用户级每日估算输入 token 上限 |
-| `maxEstimatedInputTokens` / `maxPromptChars` | `40000` / `80000` | 单次完整提示的估算 token/字符预算 |
-| `maxTranscriptChars` / `maxToolOutputChars` | `60000` / `6000` | 会话/单条工具输出字符预算 |
-| `reviewTimeoutMs` | `90000` | 单次提炼超时 |
-| `maxAttempts` / `retryBaseMs` / `retryMaxMs` | `2` / `5000` / `300000` | 失败尝试上限和重试退避 |
-| `minConfidence` / `maxSkillChars` | `0.85` / `16000` | 最低置信度/生成技能字符上限 |
-| `relevantSkillLimit` / `maxManagedSkills` | `8` / `100` | 提示内相关技能数/自动管理容量 |
-| `language` | `"zh-CN"` | 生成内容语言 |
-| `model` | 沿用任务模型 | 可选 `{ "providerID": "...", "id": "..." }` |
-| `providerAllowlist` | `[]` | 非空时，仅允许列出的 provider |
-| `excludeTools` / `excludeSessions` | `[]` / `[]` | 排除指定工具和会话 |
-| `excludeFiles` | 常见敏感路径 | 文件路径 glob；自定义数组替换配置列表，内置敏感文件规则始终生效 |
-| `sensitivePatterns` | `[]` | 至少 3 字符的敏感文字片段，按字面匹配，非正则 |
-| `storeEvidence` | `"redacted"` | 来源保留脱敏摘录，或设 `"none"` |
-| `globalStateDirectory` | 用户私有状态目录 | 可选：跨项目预算存储目录 |
+| `enabled` / `mode` | `true` / `"auto"` | Enable automatic operation; `"draft"` saves drafts only |
+| `reuseEnabled` | `true` | Enable automatic retrieval, matching and context loading for new tasks |
+| `reuseCandidateLimit` / `reuseAutoLoadLimit` | `5` / `2` | Maximum candidate summaries / automatically loaded complete skills per task |
+| `reuseMinScore` / `reuseAutoLoadScore` | `0.16` / `0.62` | Local relevance thresholds for candidates / automatic loads; constraints, conflict and safety checks still apply |
+| `reuseStaleAfterDays` | `180` | Stop recommending older versions automatically; preserve bodies |
+| `reuseMaxContextChars` / `reuseMaxSkillChars` | `16000` / `6000` | Character budgets for task reuse context / a complete skill |
+| `reuseTimeoutMs` | `5000` | Timeout for one reuse preparation; the main task continues on failure |
+| `minToolCalls` / `minToolCallsWithErrors` | `8` / `4` | Deprecated compatibility options; parsed for old configurations but no longer admit tasks |
+| `minComplexityScore` | `11` | Minimum automatic screening score; substantive signals and verification remain mandatory |
+| `debounceMs` / `cooldownMs` | `2000` / `60000` | Wait for events to settle / interval between reviews in the same session |
+| `maxReviewsPerDay` / `maxGlobalReviewsPerDay` | `20` / `100` | Daily model-call limits per project / user |
+| `maxEstimatedTokensPerDay` / `maxGlobalEstimatedTokensPerDay` | `250000` / `1000000` | Daily estimated input-token limits per project / user |
+| `maxEstimatedInputTokens` / `maxPromptChars` | `40000` / `80000` | Estimated token / character budget for a complete prompt |
+| `maxTranscriptChars` / `maxToolOutputChars` | `60000` / `6000` | Character limits for a transcript / one tool output |
+| `reviewTimeoutMs` | `90000` | Timeout for one distillation call |
+| `maxAttempts` / `retryBaseMs` / `retryMaxMs` | `2` / `5000` / `300000` | Maximum attempts and retry-backoff settings |
+| `minConfidence` / `maxSkillChars` | `0.85` / `16000` | Minimum confidence / maximum generated skill length |
+| `relevantSkillLimit` / `maxManagedSkills` | `8` / `100` | Related skills in the prompt / automatic management capacity |
+| `language` | `"zh-CN"` | Language of generated content |
+| `model` | Task model | Optional `{ "providerID": "...", "id": "..." }` override |
+| `providerAllowlist` | `[]` | When nonempty, allow only the listed providers |
+| `excludeTools` / `excludeSessions` | `[]` / `[]` | Exclude specified tools and sessions |
+| `excludeFiles` | Common sensitive paths | File-path globs; a custom array replaces the configured list, while built-in sensitive-file checks always apply |
+| `sensitivePatterns` | `[]` | Literal sensitive fragments of at least 3 characters; not regular expressions |
+| `storeEvidence` | `"redacted"` | Retain redacted evidence excerpts in provenance, or use `"none"` |
+| `globalStateDirectory` | User-private state directory | Optional storage directory for cross-project budgets |
 
-每日预算按 UTC 日期重置。预算按实际送入提示的内容估算，并在调用前预留；失败尝试也消耗预留预算。当前宿主生成接口返回文本，未提供可靠的实际 usage、输出 token 上限或强制 JSON schema 能力。因此这些限制是调用次数和估算输入预算，不是精确金额或总 token 的硬上限。`doctor` 显示实际观测到的能力。
+Daily budgets reset by UTC date. Input is estimated from content actually included in the prompt and reserved before each call. Failed attempts consume their reservation too. The current host generation API returns text without reliable actual usage, an output-token limit or enforced JSON schema. These settings therefore limit call counts and estimated input, not exact spend or total tokens. `doctor` reports observed capabilities.
 
-更新已有 Skill 时，模型需要看到完整旧正文；旧正文放不进本次预算时跳过更新，避免丢失原有步骤。去重结合相关技能检索、模型判断和 ID/标题/描述检查。
+To update a skill, the model must see its complete old body. If that body does not fit the current budget, the update is skipped to avoid losing existing steps. Deduplication combines retrieval of related skills, model judgment and ID/title/description checks.
 
-## 安装迁移、启停和卸载
+## Move, enable, disable or uninstall
 
 ```powershell
 node bin/autoskill.mjs install --project D:\your-project --dry-run
@@ -347,19 +369,19 @@ node bin/autoskill.mjs uninstall --project D:\your-project
 node bin/autoskill.mjs install --global
 ```
 
-只有显式 `--global` 才修改用户 OpenCode 配置，不能与 `--project` 或 `--config` 混用。全局启用后仍在任务所属项目生成 Skills。项目和全局重复启用时，先用 `doctor` 检查配置。
+Only an explicit `--global` changes the user's OpenCode configuration. It cannot be combined with `--project` or `--config`. Global installation still writes skills into each task's project. If the plugin is enabled both globally and locally, inspect the configuration with `doctor` first.
 
-升级或搬迁后，在新包目录重新运行 `install`，会识别包名、旧目录的包身份或已有安装记录，合并重复项并保留首项 options。若旧版目录已删除且没有安装记录，可显式指定原配置中的引用：
+After upgrading or moving the plugin, rerun `install` from the new package directory. It recognizes the package name, the old directory's package identity or an existing installation record, merges duplicates and preserves the first entry's options. If the old directory is gone and no installation record remains, specify the exact old reference from the configuration:
 
 ```powershell
 node bin/autoskill.mjs install --project D:\your-project --replace D:/old/opencode-autoskill
 ```
 
-`disable` 和 `uninstall` 在重新加载 OpenCode 后生效。卸载移除插件配置，保留技能、候选、历史版本与运行记录；不会把整份旧配置恢复回来。
+`disable` and `uninstall` take effect after OpenCode reloads. Uninstallation removes the plugin configuration while preserving skills, drafts, historical versions and runtime records. It does not restore an entire old configuration file.
 
-配置安装、迁移、同步和清理等管理命令的 `--dry-run` 只预览，不调用模型或提交对应变更。**便携 CLI `review --dry-run` 与 OpenCode/MCP 工具 `autoskill_review` 的 `dryRun` 会调用模型、消耗预算并保存候选，只是不发布 Skill 正文。** 候选可通过 `drafts inspect/publish/discard` 管理。
+For installation, migration, sync and cleanup administration, `--dry-run` previews changes without calling the model or committing the corresponding changes. **Portable CLI `review --dry-run` and the OpenCode/MCP `autoskill_review` tool's `dryRun` do call the model, consume budget and save drafts; they only skip publishing the skill body.** Manage those drafts with `drafts inspect/publish/discard`.
 
-## 开发和验证
+## Development and validation
 
 ```powershell
 npm test
@@ -371,20 +393,20 @@ npm pack
 npm run package-check -- .\opencode-autoskill-0.4.0.tgz
 ```
 
-`npm test` 覆盖配置、候选校验、任务切分、队列恢复、技能保护与 CLI 生命周期。`smoke` 启动隔离的真实 OpenCode 服务和仅监听本机的模拟模型，验证插件加载、直接工具与 Code Mode 证据、后台提炼、保存与刷新。它还在模型响应挂起时终止 CLI，再启动同一项目，核对持久队列恢复、第二次尝试和发布提交状态。它使用临时项目和独立 HOME；`OPENCODE_BIN` 可指定 CLI 路径。
+`npm test` covers configuration, candidate validation, task splitting, queue recovery, skill protection and CLI lifecycle. `smoke` starts an isolated real OpenCode service and a mock model listening only on localhost. It checks plugin loading, direct-tool and Code Mode evidence, background distillation, saving and refresh. It also terminates the CLI while a model response is pending, restarts the same project and checks persistent queue recovery, the second attempt and publication state. It uses temporary projects and an isolated HOME. Set `OPENCODE_BIN` to choose the CLI path.
 
-`npm run smoke` 不隐式重新编译，源码修改后先运行 `npm run build`。模拟模型和客户端使用 Node 内置能力，打包安装后也能直接运行 `node scripts/smoke.mjs`，无需安装开发依赖。
+`npm run smoke` does not rebuild implicitly: run `npm run build` after source changes. The mock model and client use Node's built-in APIs. A packaged installation can run `node scripts/smoke.mjs` without development dependencies.
 
-`npm run smoke:reuse` 通过真实 OpenCode 与本机模拟模型验证后续任务复用：高相关正文自动进入主模型上下文；未知前提先核实，再通过 `autoskill_load` 加载、应用并核验；模型使用报告与用户反馈区分；同一会话中的无关新任务不继承旧上下文。还检查原生受管技能清单收缩、外部用户技能保留。脚本为 `scripts/reuse-smoke.mjs`，不会调用额外 reviewer 模型；模拟模型通过只能说明集成链路可运行。
+`npm run smoke:reuse` uses real OpenCode and a local mock model to check reuse in later tasks: highly relevant bodies enter the main model context automatically; unknown prerequisites are verified before `autoskill_load`, application and verification; model reports remain distinct from user feedback; unrelated later tasks in the same session do not inherit earlier context. It also checks that the native managed-skill list can shrink while external user skills remain. The script is `scripts/reuse-smoke.mjs` and makes no extra reviewer-model call. Passing mock-model checks establishes the integration path only.
 
-`package-check` 对指定 tgz 做全新生产依赖安装、模块加载、CLI 安装/启停/卸载、离线评测及提炼/复用两类真实宿主 smoke，所有项目与配置均隔离在临时目录。
+`package-check` installs the specified archive with fresh production dependencies, loads modules, exercises CLI installation/enable/disable/uninstall, runs offline evaluation and both real-host distillation and reuse smoke checks. Projects and configurations are isolated in temporary directories.
 
-`evaluate` 默认运行候选校验样例、独立标注的复杂度初筛回放及技能检索路由回放，不调用模型。三类指标分别报告；`reuse` 包含候选召回、错误/漏掉的自动加载、每项条件和排除原因。这些检索指标不代表实际复用成功率。还可回放真实 reviewer 输出或显式连接 reviewer endpoint；这两种方式只替换提炼决策，复用检索仍为本地回放。输入格式与指标范围见 [评测说明](evaluation/README.md)。
+By default, `evaluate` runs candidate-validation examples, independently labeled complexity-screening replay and skill-retrieval routing replay without model calls. It reports these three groups separately. `reuse` reports candidate recall, incorrect/missed automatic loads, individual conditions and exclusion reasons. Retrieval metrics do not measure actual reuse success. You can replay real reviewer output or explicitly connect a reviewer endpoint; these options replace distillation decisions only, while reuse retrieval remains a local replay. See [evaluation formats and scope](evaluation/README.md).
 
-真实 CLI 与模拟模型验证集成链路，真实模型的提炼质量仍需用实际任务评测。适配层使用 SDK 2.2.7 的类型开发，运行时无需加载 SDK；宿主升级前需要重新验证。依赖审计结果以当前 `npm audit` 为准。
+A real CLI plus mock models validates integration. Real-model distillation quality still needs evaluation on actual tasks. The adapter uses SDK 2.2.7 types during development and does not load the SDK at runtime. Revalidate before upgrading the host. Dependency-audit results are those returned by the current `npm audit`.
 
-自动加载由匹配、已知前提、版本及预算决定；实际采用和执行仍依赖模型对当前任务的判断。插件不会保证每个复杂任务都生成文件，也不会把“已加载”计为“实际复用成功”。
+Automatic loading depends on matching, known prerequisites, versions and budgets. Actual adoption and execution still depend on model judgment for the current task. The plugin does not guarantee that every complex task creates a file, and a loaded skill is not counted as a successful reuse.
 
-每个模型请求按用户消息 ID 与原始首段文本 hash 关联任务修订；OpenCode 追加的附件文本不参与该 hash。其他插件若改写原始首段文本导致无法精确关联，本次附加复用跳过，主任务继续。加载账本表示插件返回过正文，不保证提供商接收请求或模型实际采用。
+Each model request is associated with a task revision through the user message ID and the hash of its original first text part. Attachment text appended by OpenCode is excluded from that hash. If another plugin rewrites the original first text part and exact association fails, additional reuse is skipped for that call while the main task proceeds. The load ledger means the plugin returned a body; it does not prove the provider received the request or the model used it.
 
-实现为原创代码。接口依据：[OpenCode 服务端插件 API](https://opencode.ai/docs/build/plugins/server/)、[插件加载](https://opencode.ai/docs/build/plugins/)、[Skills](https://opencode.ai/docs/skills/)。
+This project is original code. Interface references: [OpenCode server plugin API](https://opencode.ai/docs/build/plugins/server/), [plugin loading](https://opencode.ai/docs/build/plugins/), and [Skills](https://opencode.ai/docs/skills/).
