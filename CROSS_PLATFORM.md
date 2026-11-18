@@ -20,6 +20,8 @@
 ## 安装
 
 ```powershell
+git clone https://github.com/wangchuanbo123/opencode-autoskill.git
+cd opencode-autoskill
 npm ci
 npm run build
 
@@ -44,7 +46,7 @@ node bin/autoskill.mjs doctor --all --project D:\your-project
 生成配置使用 Node 和脚本的绝对路径，`args` 包含 `serve --host generic --project <项目绝对路径>`。保留实际安装目录；多个项目应分别注册或选择对应项目的服务。可以用以下命令确认服务入口能启动：
 
 ```powershell
-node D:\MyCode\opencode-autoskill\bin\autoskill.mjs serve --host generic --project D:\your-project
+node bin/autoskill.mjs serve --host generic --project D:\your-project
 ```
 
 服务通过 stdin/stdout 使用 MCP JSON-RPC，手工启动后等待客户端输入是正常状态。连接后让客户端列出并调用 `autoskill_search`、`autoskill_load`；这条通用入口只提供按需复用。

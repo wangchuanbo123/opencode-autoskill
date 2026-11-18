@@ -1,10 +1,31 @@
 # OpenCode AutoSkill
 
+An unofficial community plugin that distills completed agent tasks with verification evidence into reusable project skills, then retrieves relevant skills for later tasks. This project is not built by, affiliated with, or endorsed by the OpenCode team.
+
+**Compatibility:** OpenCode `>=2.2.7 <2.3.0`, Node.js `>=22.18`; tested with OpenCode **2.2.7 on Windows** using local mock models. Other supported OpenCode versions require validation. Claude Code, Codex, Gemini CLI and Cursor adapters have process/protocol tests; generic MCP provides skill search, loading and feedback, with no passive task capture. See [cross-platform setup and limits](CROSS_PLATFORM.md).
+
+### Install from source
+
+Configure a working model in OpenCode first. Replace `PATH_TO_YOUR_PROJECT` below with the absolute path to your project, and keep the cloned plugin directory after installation.
+
+```sh
+git clone https://github.com/wangchuanbo123/opencode-autoskill.git
+cd opencode-autoskill
+npm ci
+npm run build
+node bin/autoskill.mjs install --project "PATH_TO_YOUR_PROJECT"
+node bin/autoskill.mjs doctor --project "PATH_TO_YOUR_PROJECT"
+```
+
+Reload OpenCode to activate the plugin. The CLI registers this local directory in your project configuration. The package is not currently published on npm; use the source installation above. The full Chinese manual follows.
+
+本项目为社区维护的非官方插件，并非由 OpenCode 团队开发，与该团队无隶属或背书关系。
+
 现在提供 **Claude Code、Codex、Gemini CLI、Cursor 和通用 MCP** 的本地适配器。共享技能库、平台 hooks、独立复盘模型、迁移与原生导出见 [跨平台使用说明](CROSS_PLATFORM.md)。原有 OpenCode 安装方式继续兼容；其他平台的实际能力及验收范围在该文档中分别列明。
 
 在你照常使用 OpenCode 时，自动复盘复杂任务，把有验证证据、可以再次使用的方法保存为项目 Skill；后续任务开始时检索相关经验，在适用条件明确时自动加载。插件覆盖“沉淀 → 匹配 → 加载 → 使用 → 反馈”的链路。
 
-v0.4 的适配目标为 **OpenCode 2.2.7**，需要 **Node.js ≥22.18**。默认自动运行，无需每次确认或输入 `/learn`。复用通过插件接口接入，不要求修改 OpenCode 源码。
+v0.4 支持范围为 **OpenCode ≥2.2.7 且 <2.3.0**，已测试版本为 **2.2.7**，需要 **Node.js ≥22.18**；范围内其他版本仍需验证。默认自动运行，无需每次确认或输入 `/learn`。复用通过插件接口接入，不要求修改 OpenCode 源码。
 
 ## 快速开始
 
@@ -19,7 +40,8 @@ v0.4 的适配目标为 **OpenCode 2.2.7**，需要 **Node.js ≥22.18**。默�
 OpenCode 中应已配置可用的模型。从源码安装：
 
 ```powershell
-cd D:\MyCode\opencode-autoskill
+git clone https://github.com/wangchuanbo123/opencode-autoskill.git
+cd opencode-autoskill
 npm ci
 npm run build
 node bin/autoskill.mjs install --project D:\your-project
