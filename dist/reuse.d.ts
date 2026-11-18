@@ -26,6 +26,8 @@ export declare class ReuseEngine {
     private latest;
     private active;
     private registryHash?;
+    private catalogSkills;
+    private compatibilityExcluded;
     private lastScreen?;
     constructor(root: string, options: AutoSkillOptions, port: EnginePort);
     private enabled;
@@ -37,7 +39,7 @@ export declare class ReuseEngine {
     prepare(request: ReuseRequest): Promise<void>;
     private restore;
     private valid;
-    context(sessionId: string, signal?: AbortSignal, messageId?: string, queryHash?: string): Promise<ReuseContext | undefined>;
+    context(sessionId: string, signal?: AbortSignal, messageId?: string, queryHash?: string, originalText?: string): Promise<ReuseContext | undefined>;
     load(input: {
         sessionId: string;
         skillId: string;

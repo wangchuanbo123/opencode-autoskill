@@ -192,3 +192,31 @@ test("unresponsive native bookkeeping cannot defeat the distillation deadline or
   try { assert.equal((await engine.review(snapshot.sessionId, true)).reasonCode, "review_timeout"); assert.ok(Date.now() - started < 2000); }
   finally { await engine.dispose(); }
 });
+
+test("cancellation before native bookkeeping consumes its already rejected work without an unhandled rejection", async (t) => {
+  const f = await fixture(t);
+  const snapshot: TaskSnapshot = { sessionId: "session-cancelled-bookkeeping", directory: f.root, terminal: "success", messages: [
+    { id: "u", role: "user", text: "Review native skill load", tools: [] },
+    { id: "a", role: "assistant", text: "Completed", tools: [{ id: "native-call", name: "skill", status: "completed", input: { id: "migration-lock-retry" }, output: "Loaded migration lock retry." }] },
+  ] };
+  const engine = new AutoSkillEngine({ ...f.port, backgroundWorker: false,
+    options: { globalStateDirectory: path.join(f.root, "private-global") }, snapshot: async () => snapshot });
+  await (engine as any).ready;
+  const queue = (engine as any).queue, originalRead = queue.read.bind(queue);
+  const reuse = (engine as any).reuse, originalFinish = reuse.finish.bind(reuse);
+  const controller = new AbortController(); let bookkeepingStartedWithAbortedSignal = false;
+  // Reproduce cancellation at the await immediately preceding native bookkeeping.
+  queue.read = async () => { const state = await originalRead(); controller.abort(new Error("Fixture cancelled before bookkeeping")); return state; };
+  reuse.finish = async (value: TaskSnapshot, signal: AbortSignal) => {
+    bookkeepingStartedWithAbortedSignal = signal.aborted;
+    return originalFinish(value, signal);
+  };
+  const unhandled: unknown[] = [], captureUnhandled = (error: unknown) => { unhandled.push(error); };
+  process.on("unhandledRejection", captureUnhandled);
+  try {
+    assert.equal((await engine.review(snapshot.sessionId, true, controller.signal)).reasonCode, "user_cancelled");
+    assert.equal(bookkeepingStartedWithAbortedSignal, true);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.deepEqual(unhandled, []);
+  } finally { process.removeListener("unhandledRejection", captureUnhandled); queue.read = originalRead; reuse.finish = originalFinish; await engine.dispose(); }
+});

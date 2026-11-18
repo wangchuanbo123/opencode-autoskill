@@ -4,9 +4,10 @@ import { QueueStore } from "./jobs.js";
 import { acquireFileLock } from "./lock.js";
 import { atomicStateJson, ensurePrivateDirectory, regularStateFile } from "./state.js";
 import { resolveStorageLayout } from "./storage-layout.js";
+import { cleanEventEvidence } from "./portable/event-store.js";
 
 /** Remove retained evidence while preserving ownership hashes and completed-job IDs. */
-export async function cleanEvidence(root: string, options: { olderThanDays?: number; dryRun?: boolean } = {}): Promise<{ dryRun: boolean; jobs: number; files: number }> {
+export async function cleanEvidence(root: string, options: { olderThanDays?: number; dryRun?: boolean } = {}): Promise<{ dryRun: boolean; jobs: number; files: number; eventTasks?: number; eventReceipts?: number }> {
   const days = options.olderThanDays ?? 30;
   if (!Number.isFinite(days) || days < 0) throw new Error("olderThanDays must be a nonnegative number.");
   const base = resolveStorageLayout(root).stateRoot;
@@ -84,5 +85,6 @@ export async function cleanEvidence(root: string, options: { olderThanDays?: num
       } finally { await release?.(); }
     }
   }
-  return { dryRun: !!options.dryRun, jobs, files };
+  const events = await cleanEventEvidence(root, options);
+  return { dryRun: !!options.dryRun, jobs, files, ...(events.tasks || events.receipts ? { eventTasks: events.tasks, eventReceipts: events.receipts } : {}) };
 }

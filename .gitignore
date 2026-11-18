@@ -2,3 +2,6 @@ node_modules/
 *.tgz
 .opencode/autoskill/
 .test-artifacts/
+.autoskill/runtime/
+.autoskill/config-backups/
+*-tests.log

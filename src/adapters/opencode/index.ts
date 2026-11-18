@@ -1,9 +1,13 @@
 import type { Plugin } from "@opencode/plugin";
 import * as fs from "node:fs/promises";
+import * as path from "node:path";
 import { AutoSkillEngine } from "../../engine.js";
 import { digest, matchesSession } from "../../tasks.js";
-import type { ConversationMessage, EnginePort, HostCapabilities, TaskSnapshot, ToolRecord } from "../../types.js";
+import type { ConversationMessage, EnginePort, ExistingSkill, HostCapabilities, TaskSnapshot, ToolRecord } from "../../types.js";
 import { resolveStorageLayout } from "../../storage-layout.js";
+import { readPortableConfig, readSafeFile, sha256 } from "../../portable/install.js";
+import { SkillStore } from "../../skills.js";
+import { sqliteBusy } from "../../sqlite.js";
 
 type SessionInfo = Awaited<ReturnType<Plugin.Context["session"]["get"]>>;
 type SessionRecords = Awaited<ReturnType<Plugin.Context["session"]["context"]>>;
@@ -12,12 +16,39 @@ type AssistantTool = Extract<AssistantRecord["content"][number], { type: "tool" 
 
 export type AdapterEngine = Pick<AutoSkillEngine, "schedule" | "review" | "status" | "dispose"> & {
   prepareReuse?(input: { sessionId: string; messageId: string; text: string; signal?: AbortSignal }): Promise<void>;
-  reuseContext?(sessionId: string, signal?: AbortSignal, messageId?: string, queryHash?: string): Promise<{ text: string; candidateIds: string[]; catalog?: { id: string; description: string; hostIds?: string[] }[] } | undefined>;
+  reuseContext?(sessionId: string, signal?: AbortSignal, messageId?: string, queryHash?: string, originalText?: string): Promise<{ text: string; candidateIds: string[]; catalog?: { id: string; description: string; hostIds?: string[] }[] } | undefined>;
   loadReuse?(input: { sessionId: string; skillId: string; signal?: AbortSignal }): Promise<unknown>;
   searchReuse?(input: { sessionId: string; query: string; signal?: AbortSignal }): Promise<unknown>;
   reuseFeedback?(input: { sessionId: string; skillId: string; outcome: "success" | "failure" | "unknown"; used?: boolean; signal?: AbortSignal }): Promise<unknown>;
 };
 export type EngineFactory = (port: EnginePort) => AdapterEngine;
+
+/** Recognize exact, unchanged native exports without taking ownership of user files. */
+export async function resolveManagedSkillAliases(root: string, skills: ExistingSkill[]): Promise<ExistingSkill[]> {
+  if (resolveStorageLayout(root).kind !== "portable") return skills;
+  try {
+    const text = await readSafeFile(path.join(root, ".autoskill", "exports", "opencode.json"));
+    if (!text) return skills;
+    const manifest = JSON.parse(text);
+    if (manifest.schemaVersion !== 1 || manifest.host !== "opencode" || !manifest.skills || typeof manifest.skills !== "object" || Array.isArray(manifest.skills)) return skills;
+    const managed = (await new SkillStore(root).list()).filter(skill => skill.ownership === "managed" && !skill.archived);
+    const aliases = new Map<string, { path: string; hash: string }>();
+    for (const [id, record] of Object.entries(manifest.skills)) {
+      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id) || !record || typeof record !== "object") continue;
+      const entry = record as { file?: unknown; sourceHash?: unknown; exportHash?: unknown };
+      const expectedRelative = path.join(".opencode", "skills", id, "SKILL.md");
+      if (typeof entry.file !== "string" || path.normalize(entry.file) !== expectedRelative) continue;
+      const source = managed.find(skill => skill.id === id && skill.sha256 === entry.sourceHash && entry.exportHash === entry.sourceHash);
+      if (!source) continue;
+      const file = path.join(root, expectedRelative), content = await readSafeFile(file, 256_000);
+      if (content !== undefined && sha256(content) === source.sha256) aliases.set(path.resolve(file), { path: source.path, hash: source.sha256 });
+    }
+    return skills.map(skill => {
+      const alias = aliases.get(path.resolve(skill.path));
+      return alias && (skill.content === undefined || sha256(skill.content) === alias.hash) ? { ...skill, path: alias.path } : skill;
+    });
+  } catch { return skills; }
+}
 
 /** Guard the experimental API contract before starting background work. */
 export function detectCapabilities(ctx: Plugin.Context): HostCapabilities {
@@ -85,6 +116,29 @@ async function reconnectDelay(ms: number, signal: AbortSignal): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try { await abortable(signal, () => new Promise<void>((resolve) => { timer = setTimeout(resolve, ms); timer.unref(); })); }
   finally { if (timer) clearTimeout(timer); }
+}
+
+/** Keep diagnostics useful without exposing error messages, paths or host-provided fields. */
+function reuseFailureCategory(error: unknown, signal: AbortSignal): string {
+  const item = error as { name?: unknown; code?: unknown } | undefined;
+  if (signal.aborted || item?.name === "AbortError" || item?.name === "TimeoutError") {
+    return (signal.reason as { name?: unknown } | undefined)?.name === "TimeoutError" || item?.name === "TimeoutError" ? "timeout" : "aborted";
+  }
+  if (sqliteBusy(error)) return "sqlite_busy";
+  switch (item?.code) {
+    case "EACCES": return "eacces";
+    case "EPERM": return "eperm";
+    case "ENOENT": return "enoent";
+    case "ENOTDIR": return "enotdir";
+    case "ELOOP": return "eloop";
+    case "ENOSPC": return "enospc";
+    case "EIO": return "eio";
+    case "EROFS": return "erofs";
+    case "EMFILE": return "emfile";
+    case "ENFILE": return "enfile";
+    case "EBUSY": return "ebusy";
+    default: return "operation_failed";
+  }
 }
 
 function toolRecord(tool: AssistantTool): ToolRecord {
@@ -164,11 +218,20 @@ export async function setupAdapter(ctx: Plugin.Context, createEngine: EngineFact
   const capabilities = detectCapabilities(ctx);
   const reuseCapabilities = detectReuseCapabilities(ctx);
   const portable = resolveStorageLayout(ctx.location.directory).kind === "portable";
+  const shared = portable ? await readPortableConfig(ctx.location.directory) : undefined;
+  const effectiveOptions: Record<string, unknown> = { ...(shared?.options ?? {}), ...(shared ? { agentPolicy: shared.agentPolicy } : {}), ...ctx.options,
+    ...(shared?.adapters.opencode?.enabled === false ? { enabled: false } : {}) };
   const port: EnginePort = {
     root: ctx.location.directory,
     hostId: portable ? "opencode" : undefined,
     workspaceId: portable ? await fs.realpath(ctx.location.directory) : undefined,
-    options: ctx.options,
+    compatibilityHostId: "opencode",
+    hostCapabilities: [
+      ["opencode.session.get", ctx.session?.get], ["opencode.session.context", ctx.session?.context], ["opencode.session.hook", ctx.session?.hook],
+      ["opencode.experimental.generate.text", ctx.experimental?.generate?.text], ["opencode.skill.list", ctx.skill?.list], ["opencode.skill.reload", ctx.skill?.reload],
+      ["opencode.tool.transform", ctx.tool?.transform], ["opencode.event.subscribe", ctx.event?.subscribe],
+    ].filter(([, value]) => typeof value === "function").map(([name]) => String(name)),
+    options: effectiveOptions,
     capabilities,
     reuseCapabilities,
     async snapshot(sessionId, terminal, signal) {
@@ -189,7 +252,7 @@ export async function setupAdapter(ctx: Plugin.Context, createEngine: EngineFact
     async listSkills(signal) {
       const usedSignal = signalFor(signal);
       const result = await abortable(usedSignal, () => ctx.skill.list({ location: { directory: ctx.location.directory } }, { signal: usedSignal }));
-      return result.data.map((skill) => ({
+      const skills = result.data.map((skill) => ({
         id: skill.id,
         name: skill.name,
         description: skill.description ?? "",
@@ -198,6 +261,7 @@ export async function setupAdapter(ctx: Plugin.Context, createEngine: EngineFact
         // The store independently checks ownership before updating a file.
         managed: false,
       }));
+      return resolveManagedSkillAliases(ctx.location.directory, skills);
     },
     async reloadSkills(signal) { await abortable(signalFor(signal), () => ctx.skill.reload()); },
     log(level, message) { console[level](`[opencode-autoskill] ${message}`); },
@@ -206,23 +270,24 @@ export async function setupAdapter(ctx: Plugin.Context, createEngine: EngineFact
   if (!capabilities.supported) port.log("warn", `Automatic reviews are disabled: ${capabilities.missing.join(", ")}.`);
   let tools: { dispose(): Promise<void> | void } = { dispose() {} };
   const reuseRegistrations: { dispose(): Promise<void> | void }[] = [];
-  const reuseEnabled = ctx.options?.enabled !== false && ctx.options?.reuseEnabled !== false;
+  const reuseEnabled = effectiveOptions.enabled !== false && effectiveOptions.reuseEnabled !== false;
   const reuseSupported = reuseEnabled && reuseCapabilities.supported && typeof engine.prepareReuse === "function" && typeof engine.reuseContext === "function";
   const hookWork = new Set<Promise<void>>();
-  const hookDeadline = typeof ctx.options?.reuseTimeoutMs === "number" ? Math.max(100, Math.min(30_000, ctx.options.reuseTimeoutMs)) : 5_000;
+  const hookDeadline = typeof effectiveOptions.reuseTimeoutMs === "number" ? Math.max(100, Math.min(30_000, effectiveOptions.reuseTimeoutMs)) : 5_000;
   const inReuseScope = async (sessionId: string, signal: AbortSignal) => {
-    if (matchesSession(sessionId, Array.isArray(ctx.options?.excludeSessions) ? ctx.options.excludeSessions as string[] : [])) return false;
+    if (matchesSession(sessionId, Array.isArray(effectiveOptions.excludeSessions) ? effectiveOptions.excludeSessions as string[] : [])) return false;
     const info = await abortable(signal, () => ctx.session.get({ sessionID: sessionId as SessionInfo["id"] }, { signal }));
-    if (info.parentID && ctx.options?.agentPolicy !== "independent" || info.agent?.startsWith("autoskill")) return false;
+    if (info.parentID && effectiveOptions.agentPolicy !== "independent" || info.agent?.startsWith("autoskill")) return false;
     const [root, directory] = await abortable(signal, () => Promise.all([fs.realpath(ctx.location.directory), fs.realpath(info.location.directory)]));
     return root === directory;
   };
-  const runHook = (operation: (signal: AbortSignal) => Promise<void>): Promise<void> => {
+  const runHook = (stage: "prompt" | "context", operation: (signal: AbortSignal) => Promise<void>): Promise<void> => {
+    const started = performance.now();
     const deadline = new AbortController();
     const timer = setTimeout(() => deadline.abort(new DOMException("AutoSkill reuse timed out", "TimeoutError")), hookDeadline);
     const signal = AbortSignal.any([controller.signal, deadline.signal]);
-    const promise = abortable(signal, () => operation(signal)).catch(() => {
-      if (!controller.signal.aborted) port.log("warn", "Skill reuse was unavailable for this request; continuing the task without additional skill context.");
+    const promise = abortable(signal, () => operation(signal)).catch((error: unknown) => {
+      if (!controller.signal.aborted) port.log("warn", `Skill reuse was unavailable for this request; continuing the task without additional skill context. hook=${stage} reason=${reuseFailureCategory(error, signal)} elapsedMs=${Math.max(0, Math.round(performance.now() - started))}`);
     }).finally(() => { clearTimeout(timer); hookWork.delete(promise); });
     hookWork.add(promise); return promise;
   };
@@ -290,11 +355,11 @@ export async function setupAdapter(ctx: Plugin.Context, createEngine: EngineFact
       });
     });
     if (reuseSupported) {
-      reuseRegistrations.push(await ctx.session.hook("prompt", (input) => runHook(async (signal) => {
+      reuseRegistrations.push(await ctx.session.hook("prompt", (input) => runHook("prompt", async (signal) => {
         if (!await inReuseScope(input.sessionID, signal)) return;
         await engine.prepareReuse!({ sessionId: input.sessionID, messageId: input.messageID, text: input.prompt.text, signal });
       })));
-      reuseRegistrations.push(await ctx.session.hook("context", (input) => runHook(async (signal) => {
+      reuseRegistrations.push(await ctx.session.hook("context", (input) => runHook("context", async (signal) => {
         if (input.agent.startsWith("autoskill") || !await inReuseScope(input.sessionID, signal)) return;
         const user = [...input.messages].reverse().find((message) => message.role === "user");
         const messageId = user?.id;
@@ -303,7 +368,7 @@ export async function setupAdapter(ctx: Plugin.Context, createEngine: EngineFact
         // V2.2.7 retains the admitted prompt as its first text part and appends
         // rendered file/skill attachments afterward. Attachments are not revisions.
         const queryHash = digest(user!.content.find((part) => part.type === "text")?.text ?? "");
-        const reused = await engine.reuseContext!(input.sessionID, signal, messageId, queryHash);
+        const reused = await engine.reuseContext!(input.sessionID, signal, messageId, queryHash, user!.content.find((part) => part.type === "text")?.text ?? "");
         signal.throwIfAborted();
         input.system = input.system.filter((part) => part.metadata?.autoskillReuse !== true);
         if (!reused) return;

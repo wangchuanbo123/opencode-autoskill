@@ -12,6 +12,8 @@ export interface ReviewInput {
 }
 export interface ReviewContext {
     preScreen?: unknown;
+    hostId?: string;
+    hostCapabilities?: string[];
 }
 export declare function terms(text: string): Set<string>;
 export declare function selectRelevantSkills(snapshot: TaskSnapshot, skills: ExistingSkill[], limit: number): ExistingSkill[];

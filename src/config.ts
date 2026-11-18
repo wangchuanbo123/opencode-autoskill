@@ -59,7 +59,7 @@ export function readOptions(input: Record<string, unknown> = {}): AutoSkillOptio
     output.enabled = input.enabled;
   }
   if (input.agentPolicy !== undefined) {
-    if (!["root-only", "inherit", "independent"].includes(String(input.agentPolicy))) throw new Error("agentPolicy must be root-only, inherit or independent.");
+    if (typeof input.agentPolicy !== "string" || !["root-only", "inherit", "independent"].includes(input.agentPolicy)) throw new Error("agentPolicy must be root-only, inherit or independent.");
     output.agentPolicy = input.agentPolicy as AutoSkillOptions["agentPolicy"];
   }
   if (input.reuseEnabled !== undefined) {

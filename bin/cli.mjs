@@ -266,6 +266,11 @@ async function loadBuilt(file) {
   return import(pathToFileURL(full).href);
 }
 
+async function storageLayout(root) {
+  const { resolveStorageLayout } = await loadBuilt("storage-layout.js");
+  return resolveStorageLayout(root);
+}
+
 function summarizeRuntime(state) {
   const jobs = Array.isArray(state.jobs) ? state.jobs : Object.values(state.jobs ?? {});
   const counts = {};
@@ -280,7 +285,7 @@ function summarizeRuntime(state) {
     reviews: state.reviews, budget: state.budget ?? { day: state.day, reviews: state.reviews, estimatedInputTokens: state.inputTokens ?? 0 },
     lastEventAt: state.lastEventAt ?? state.lastSeenAt, lastRecoveryAt: state.lastRecoveryAt,
     capabilities: state.capabilities ?? null, reuseCapabilities: state.reuseCapabilities ?? null, lastDecision, metrics: state.metrics ?? {}, queue: counts,
-    jobs: jobs.sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0)).slice(0, 30).map(job => ({ id: job.id, sessionId: job.sessionId, status: job.status, attempts: job.attempts,
+    jobs: jobs.sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0)).slice(0, 30).map(job => ({ id: job.id, sessionId: job.sessionId, hostId: job.hostId, workspaceId: job.workspaceId, status: job.status, attempts: job.attempts,
       nextRunAt: job.nextRunAt, reasonCode: job.reasonCode ?? job.result?.reasonCode, reason: job.reason ?? job.result?.reason ?? job.lastResult?.reason,
       preScreen: job.preScreen ? { eligible: job.preScreen.eligible, version: job.preScreen.version, score: job.preScreen.score,
         threshold: job.preScreen.threshold, dimensions: job.preScreen.dimensions, reasonCodes: job.preScreen.reasonCodes } : undefined })), recent };
@@ -293,7 +298,7 @@ async function queueStore(root) {
 }
 
 async function runtimeState(root) {
-  const directory = path.join(root, ".opencode", "autoskill");
+  const directory = (await storageLayout(root)).stateRoot;
   const database = path.join(directory, "runtime.sqlite");
   const legacy = path.join(directory, "state.json");
   const reuse = await reuseRuntime(root);
@@ -307,7 +312,7 @@ async function runtimeState(root) {
 }
 
 async function reuseRuntime(root) {
-  if (!await regular(path.join(root, ".opencode", "autoskill", "reuse.sqlite"), 100_000_000)) return undefined;
+  if (!await regular(path.join((await storageLayout(root)).stateRoot, "reuse.sqlite"), 100_000_000)) return undefined;
   const { ReuseStore } = await loadBuilt("reuse-store.js");
   const ledger = new ReuseStore(root);
   try { return { ...await ledger.status(), history: (await ledger.history()).slice(0, 100) }; } finally { await ledger.close(); }
@@ -319,7 +324,7 @@ async function reuseCommand(root, positional, options) {
   if (["status", "govern"].includes(command) && skillId) throw new Error(`reuse ${command} 不接受技能 ID。`);
   if (command === "status") return await reuseRuntime(root) ?? { status: "not-started", searchedTasks: 0, loadedTasks: 0, reportedUsedTasks: 0, recent: [] };
   const { ReuseStore } = await loadBuilt("reuse-store.js");
-  const ledgerFile = path.join(root, ".opencode", "autoskill", "reuse.sqlite");
+  const ledgerFile = path.join((await storageLayout(root)).stateRoot, "reuse.sqlite");
   const present = await regular(ledgerFile, 100_000_000);
   if (command === "history" && !present) return { history: [] };
   if (command === "feedback" && !present) throw new Error("没有可反馈的已加载技能记录。");

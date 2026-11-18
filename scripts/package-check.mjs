@@ -32,7 +32,7 @@ try {
   const installed = path.join(host, "node_modules", "opencode-autoskill");
   const manifest = JSON.parse(await fs.readFile(path.join(installed, "package.json"), "utf8"));
   assert.equal(manifest.version, ownManifest.version);
-  assert.deepEqual(Object.keys(manifest.dependencies).sort(), ["jsonc-parser", "yaml"]);
+  assert.deepEqual(manifest.dependencies, ownManifest.dependencies);
   await assert.rejects(fs.access(path.join(host, "node_modules", "@opencode", "plugin")));
   const plugin = (await import(pathToFileURL(path.join(installed, "dist", "index.js")).href)).default;
   assert.equal(plugin.id, "opencode-autoskill"); assert.equal(typeof plugin.setup, "function");
@@ -48,8 +48,9 @@ try {
   const evaluation = await run(process.execPath, [path.join(installed, "scripts", "evaluate.mjs")]);
   const smoke = await run(process.execPath, [path.join(installed, "scripts", "smoke.mjs")]);
   const reuseSmoke = await run(process.execPath, [path.join(installed, "scripts", "reuse-smoke.mjs")]);
+  const portableSmoke = await run(process.execPath, [path.join(installed, "scripts", "portable-smoke.mjs")]);
   console.log(JSON.stringify({ passed: true, tarball: path.basename(artifact), version: manifest.version, productionDependencies: Object.keys(manifest.dependencies),
-    isolatedInstall: true, cliLifecycle: true, evaluation: JSON.parse(evaluation), hostSmoke: smoke.trim(), reuseHostSmoke: reuseSmoke.trim() }, null, 2));
+    isolatedInstall: true, cliLifecycle: true, evaluation: JSON.parse(evaluation), hostSmoke: smoke.trim(), reuseHostSmoke: reuseSmoke.trim(), portableSmoke: JSON.parse(portableSmoke) }, null, 2));
 } finally {
   if (path.dirname(temporary) === path.resolve(os.tmpdir()) && path.basename(temporary).startsWith("autoskill-package-check-")) await fs.rm(temporary, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }

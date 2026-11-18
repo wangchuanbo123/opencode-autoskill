@@ -21,6 +21,8 @@ export declare class AutoSkillEngine {
     schedule(sessionId: string, terminal: TaskSnapshot["terminal"]): void;
     /** Persist completed evidence before a short-lived host hook exits. */
     enqueue(sessionId: string, terminal?: TaskSnapshot["terminal"], signal?: AbortSignal): Promise<ReviewResult>;
+    /** Revoke queued evidence before a revised task is admitted, including another worker's lease. */
+    invalidate(sessionId: string, reasonCode?: string): Promise<void>;
     private sessionKey;
     private ownsJob;
     private note;
@@ -40,7 +42,7 @@ export declare class AutoSkillEngine {
     private execute;
     status(): Promise<unknown>;
     prepareReuse(request: ReuseRequest): Promise<void>;
-    reuseContext(sessionId: string, signal?: AbortSignal, messageId?: string, queryHash?: string): Promise<ReuseContext | undefined>;
+    reuseContext(sessionId: string, signal?: AbortSignal, messageId?: string, queryHash?: string, originalText?: string): Promise<ReuseContext | undefined>;
     loadReuse(input: {
         sessionId: string;
         skillId: string;

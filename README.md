@@ -1,15 +1,25 @@
 # OpenCode AutoSkill
 
+现在提供 **Claude Code、Codex、Gemini CLI、Cursor 和通用 MCP** 的本地适配器。共享技能库、平台 hooks、独立复盘模型、迁移与原生导出见 [跨平台使用说明](CROSS_PLATFORM.md)。原有 OpenCode 安装方式继续兼容；其他平台的实际能力及验收范围在该文档中分别列明。
+
 在你照常使用 OpenCode 时，自动复盘复杂任务，把有验证证据、可以再次使用的方法保存为项目 Skill；后续任务开始时检索相关经验，在适用条件明确时自动加载。插件覆盖“沉淀 → 匹配 → 加载 → 使用 → 反馈”的链路。
 
 v0.4 的适配目标为 **OpenCode 2.2.7**，需要 **Node.js ≥22.18**。默认自动运行，无需每次确认或输入 `/learn`。复用通过插件接口接入，不要求修改 OpenCode 源码。
 
 ## 快速开始
 
+按使用的平台选择入口：
+
+| 平台 | 安装与诊断 |
+|---|---|
+| OpenCode | 按下方快速开始安装，使用宿主已配置的模型 |
+| Claude Code / Codex / Gemini CLI / Cursor | [跨平台安装](CROSS_PLATFORM.md#安装)，自动提炼还需[配置复盘模型](CROSS_PLATFORM.md#配置复盘模型) |
+| 其他支持 MCP 的智能体 | 安装 `--host generic`，将生成的服务条目注册到客户端，使用 search/load 按需复用，见[接入步骤](CROSS_PLATFORM.md#通用-mcp-客户端接入) |
+
 OpenCode 中应已配置可用的模型。从源码安装：
 
 ```powershell
-cd D:\AI-DataSummary\opencode-autoskill
+cd D:\MyCode\opencode-autoskill
 npm ci
 npm run build
 node bin/autoskill.mjs install --project D:\your-project
@@ -48,6 +58,8 @@ node D:\plugins\autoskill-host\node_modules\opencode-autoskill\bin\autoskill.mjs
 ```
 
 每个新任务都会尝试本地检索，不另开一次模型请求进行匹配。按用户消息 ID 关联候选和本次加载，防止把上一个任务的匹配结果套用到新的请求。任务没有相关技能时照常执行；检索失败或超时不会阻止主任务。
+
+OpenCode 复用失败日志提供 `hook` 阶段、固定 `reason` 类别和 `elapsedMs` 耗时，帮助区分超时、锁竞争和文件访问问题；日志不包含异常原文、任务文字或文件路径。
 
 宿主接入使用 `session.hook("prompt")` 在用户输入接收时准备检索，使用 `session.hook("context")` 在主模型调用前为当前用户消息重建复用上下文；排队的新输入也有独立任务关联。插件不改写用户消息或显式技能附件，复用上下文随主任务提供；子会话和不在当前项目范围内的任务不进入这条自动链路。
 
@@ -321,7 +333,9 @@ node bin/autoskill.mjs install --global
 node bin/autoskill.mjs install --project D:\your-project --replace D:/old/opencode-autoskill
 ```
 
-`disable` 和 `uninstall` 在重新加载 OpenCode 后生效。卸载移除插件配置，保留技能、候选、历史版本与运行记录；不会把整份旧配置恢复回来。所有 CLI `--dry-run` 均不调用模型、不修改配置或技能；OpenCode 工具 `autoskill_review` 的 `dryRun` 会调用模型生成预览，消耗复盘预算。
+`disable` 和 `uninstall` 在重新加载 OpenCode 后生效。卸载移除插件配置，保留技能、候选、历史版本与运行记录；不会把整份旧配置恢复回来。
+
+配置安装、迁移、同步和清理等管理命令的 `--dry-run` 只预览，不调用模型或提交对应变更。**便携 CLI `review --dry-run` 与 OpenCode/MCP 工具 `autoskill_review` 的 `dryRun` 会调用模型、消耗预算并保存候选，只是不发布 Skill 正文。** 候选可通过 `drafts inspect/publish/discard` 管理。
 
 ## 开发和验证
 
@@ -341,7 +355,7 @@ npm run package-check -- .\opencode-autoskill-0.4.0.tgz
 
 `npm run smoke:reuse` 通过真实 OpenCode 与本机模拟模型验证后续任务复用：高相关正文自动进入主模型上下文；未知前提先核实，再通过 `autoskill_load` 加载、应用并核验；模型使用报告与用户反馈区分；同一会话中的无关新任务不继承旧上下文。还检查原生受管技能清单收缩、外部用户技能保留。脚本为 `scripts/reuse-smoke.mjs`，不会调用额外 reviewer 模型；模拟模型通过只能说明集成链路可运行。
 
-`package-check` 对指定 tgz 做全新生产依赖安装、模块加载、CLI 安装/启停/卸载、离线评测及提炼/复用两类真实宿主 smoke，所有项目与配置均隔离在临时目录。逐项审查修复记录见 [IMPLEMENTATION.md](IMPLEMENTATION.md)。
+`package-check` 对指定 tgz 做全新生产依赖安装、模块加载、CLI 安装/启停/卸载、离线评测及提炼/复用两类真实宿主 smoke，所有项目与配置均隔离在临时目录。
 
 `evaluate` 默认运行候选校验样例、独立标注的复杂度初筛回放及技能检索路由回放，不调用模型。三类指标分别报告；`reuse` 包含候选召回、错误/漏掉的自动加载、每项条件和排除原因。这些检索指标不代表实际复用成功率。还可回放真实 reviewer 输出或显式连接 reviewer endpoint；这两种方式只替换提炼决策，复用检索仍为本地回放。输入格式与指标范围见 [评测说明](evaluation/README.md)。
 

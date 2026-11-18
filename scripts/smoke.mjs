@@ -35,23 +35,29 @@ let reviewRequests = 0;
 let primaryRequests = 0;
 let firstReviewHeld = false;
 let spawnError;
+let hostPhase = "initial-startup";
+const hostOutput = [];
+let childClosed = true;
+let waitForClose;
 const observedTools = new Set();
 
 function startServer(port) {
   output = ""; spawnError = undefined;
-  child = spawn(executable, ["serve", "--hostname", "127.0.0.1", "--port", String(port)], { cwd: project, env: environment, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
-  child.stdout.on("data", (data) => { output = (output + data).slice(-20_000); });
-  child.stderr.on("data", (data) => { output = (output + data).slice(-20_000); });
-  child.on("error", (error) => { spawnError = error; });
+  const processChild = child = spawn(executable, ["serve", "--hostname", "127.0.0.1", "--port", String(port)], { cwd: project, env: environment, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+  const record = { phase: hostPhase, output: "" }; hostOutput.push(record);
+  childClosed = false;
+  waitForClose = new Promise(resolve => processChild.once("close", () => { if (child === processChild) childClosed = true; resolve(); }));
+  const append = data => { record.output = (record.output + data).slice(-20_000); if (child === processChild) output = record.output; };
+  processChild.stdout.on("data", append);
+  processChild.stderr.on("data", append);
+  processChild.on("error", (error) => { if (child === processChild) spawnError = error; });
 }
 
 async function stopServer() {
-  if (child && child.exitCode === null) {
-    const exited = new Promise((resolve) => child.once("exit", resolve));
-    child.kill();
-    await Promise.race([exited, delay(5_000)]);
-    if (child.exitCode === null && child.signalCode === null) throw new Error("The isolated OpenCode process did not stop.");
-  }
+  if (!child || childClosed) return;
+  if (child.exitCode === null && child.signalCode === null) child.kill();
+  await Promise.race([waitForClose, delay(5_000)]);
+  if (!childClosed) throw new Error("The isolated OpenCode process or its output streams did not close.");
 }
 
 async function until(predicate, message, timeoutMs = 30_000) {
@@ -61,6 +67,36 @@ async function until(predicate, message, timeoutMs = 30_000) {
     await delay(100);
   }
   throw new Error(message);
+}
+
+async function isolatedHostLogs() {
+  const logs = [];
+  // Read only the synthetic host's generated home; never inspect the user's host logs.
+  async function visit(directory, depth = 0) {
+    if (depth > 5 || logs.length >= 8) return;
+    for (const entry of await fs.readdir(directory, { withFileTypes: true }).catch(() => [])) {
+      if (logs.length >= 8) break;
+      if (entry.isSymbolicLink()) continue;
+      const file = path.join(directory, entry.name);
+      if (entry.isDirectory()) await visit(file, depth + 1);
+      else if (entry.isFile() && /\.log$/i.test(entry.name)) {
+        const handle = await fs.open(file, "r");
+        try {
+          const stat = await handle.stat(), size = Math.min(stat.size, 12_000), data = Buffer.alloc(size);
+          await handle.read(data, 0, size, Math.max(0, stat.size - size));
+          logs.push({ file: path.relative(home, file), tail: data.toString("utf8") });
+        } finally { await handle.close(); }
+      }
+    }
+  }
+  await visit(home);
+  return logs;
+}
+
+async function hostDiagnostics() {
+  const diagnostics = JSON.stringify({ phase: hostPhase, pid: child?.pid, primaryRequests, reviewRequests,
+    hosts: hostOutput, isolatedLogs: await isolatedHostLogs().catch(() => [{ unavailable: true }]) });
+  return diagnostics.replace(/server password [^\\\r\n]+/g, "server password [redacted]").replaceAll(environment.OPENCODE_SERVER_PASSWORD, "[redacted]");
 }
 
 function response(res, body, content, toolCall) {
@@ -215,7 +251,7 @@ export default { id: "autoskill-smoke-fixture", async setup(ctx) {
         return plugins.data.some((plugin) => plugin.id === "opencode-autoskill" && plugin.state.status === "active");
       }, "Plugin did not activate.", 20_000);
     } catch {
-      throw new Error(`Official CLI did not load package. Plugins: ${JSON.stringify(plugins)}; isolated config: ${JSON.stringify(await client.config.get())}`);
+      throw new Error(`Official CLI did not load package. Phase: ${hostPhase}; PID: ${child.pid}; primaryRequests: ${primaryRequests}; reviewRequests: ${reviewRequests}; Plugins: ${JSON.stringify(plugins)}; isolated config: ${JSON.stringify(await client.config.get())}`);
     }
   }
   await waitForHost();
@@ -231,6 +267,7 @@ export default { id: "autoskill-smoke-fixture", async setup(ctx) {
     assert.equal(state.capabilities.hostVersion, "2.2.7");
   } finally { queue.close(); }
   await stopServer();
+  hostPhase = "restart-recovery";
   startServer(serverPort);
   await waitForHost();
   const skillPath = path.join(project, ".opencode", "skills", "autoskill-smoke-workflow", "SKILL.md");
@@ -264,9 +301,10 @@ export default { id: "autoskill-smoke-fixture", async setup(ctx) {
     }, "Recovered review must commit its skill and durable job result.", 5_000);
   } finally { queue.close(); }
   console.log(JSON.stringify({ passed: true, cli: `OpenCode ${serverInfo.version}`, tools: ["autoskill_status", "autoskill_review"], primaryRequests, reviewRequests, codeMode: true, crashRecovery: true, skillReloaded: true }));
+  if (process.env.AUTOSKILL_SMOKE_HOST_DIAGNOSTICS === "1") console.error(await hostDiagnostics());
 } catch (error) {
   console.error(String(error));
-  console.error(output.replace(/server password [^\r\n]+/g, "server password [redacted]"));
+  console.error(await hostDiagnostics());
   process.exitCode = 1;
 } finally {
   await stopServer().catch((error) => { console.error(String(error)); process.exitCode = 1; });

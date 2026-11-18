@@ -1,5 +1,6 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { randomUUID } from "node:crypto";
 import { readOptions } from "./config.js";
 import { SkillStore, SkillConflictError } from "./skills.js";
 import { QueueStore, GlobalBudgetStore } from "./jobs.js";
@@ -9,6 +10,7 @@ import { collectTasks, assessComplexity, COMPLEXITY_POLICY_VERSION, digest, matc
 import { PLUGIN_VERSION } from "./version.js";
 import { ReuseEngine } from "./reuse.js";
 import { truncate } from "./safety.js";
+import { compatibilityReasons } from "./compatibility.js";
 class Stop extends Error {
     code;
     constructor(code) {
@@ -18,12 +20,19 @@ class Stop extends Error {
 }
 function stopCode(signal) { return signal.reason instanceof Stop ? signal.reason.code : "user_cancelled"; }
 async function bounded(work, signal) {
-    signal.throwIfAborted();
+    // Callers have already started work before this function sees its signal.
+    // Even an immediately cancelled wait must consume that work's rejection.
+    if (signal.aborted) {
+        void work.catch(() => undefined);
+        signal.throwIfAborted();
+    }
     let listener;
     try {
         return await Promise.race([work, new Promise((_, reject) => {
                 listener = () => reject(signal.reason ?? new Stop("user_cancelled"));
                 signal.addEventListener("abort", listener, { once: true });
+                if (signal.aborted)
+                    listener();
             })]);
     }
     finally {
@@ -88,7 +97,26 @@ export class AutoSkillEngine {
     }
     /** Persist completed evidence before a short-lived host hook exits. */
     async enqueue(sessionId, terminal = "unknown", signal) {
+        if (this.disposed || !this.options.enabled)
+            return result("skipped", "disabled", "AutoSkill is disabled.");
         return (await this.capture(sessionId, terminal, false, signal)).last;
+    }
+    /** Revoke queued evidence before a revised task is admitted, including another worker's lease. */
+    async invalidate(sessionId, reasonCode = "task_revised") {
+        await this.ready;
+        if (this.active?.sessionId === sessionId)
+            this.active.controller.abort(new Stop(reasonCode));
+        await this.queue.transaction((state) => {
+            for (const job of Object.values(state.jobs)) {
+                if (!this.ownsJob(job) || job.sessionId !== sessionId || !["pending", "retry", "running"].includes(job.status))
+                    continue;
+                job.status = "cancelled";
+                job.reasonCode = reasonCode;
+                job.updatedAt = Date.now();
+                job.result = result("cancelled", reasonCode, "Task evidence was superseded; this revision cannot publish.", { taskId: job.id });
+                delete job.lease;
+            }
+        });
     }
     sessionKey(sessionId) { return scopedSessionId(sessionId, this.port.hostId, this.port.workspaceId ?? this.root); }
     ownsJob(job) { return job.hostId === this.port.hostId && job.workspaceId === this.port.workspaceId; }
@@ -127,6 +155,8 @@ export class AutoSkillEngine {
         }
     }
     allowed(snapshot) {
+        if (this.port.hostId && snapshot.hostId !== this.port.hostId || this.port.workspaceId && snapshot.workspaceId !== this.port.workspaceId)
+            return false;
         const internal = snapshot.origin ? ["reviewer", "maintenance"].includes(snapshot.origin.kind) : snapshot.agent?.startsWith("autoskill");
         const child = !!snapshot.parentId || snapshot.origin?.kind === "subagent";
         return !internal && (!child || this.options.agentPolicy === "independent") && !matchesSession(snapshot.sessionId, this.options.excludeSessions);
@@ -161,17 +191,24 @@ export class AutoSkillEngine {
     async capture(sessionId, terminal, force, signal, manual = false) {
         await this.ready;
         if (this.port.capabilities?.supported === false)
-            return { packets: [], last: await this.note(sessionId, result("skipped", "unsupported_host", "Required OpenCode plugin capabilities are unavailable.")) };
+            return { packets: [], last: await this.note(sessionId, result("skipped", "unsupported_host", "Required host capabilities are unavailable.")) };
         if (matchesSession(sessionId, this.options.excludeSessions))
             return { packets: [], last: await this.note(sessionId, result("skipped", "session_excluded", "Session excluded by privacy policy.")) };
         const requestId = digest(["capture", this.sessionKey(sessionId)]);
-        await this.queue.transaction((state) => {
+        const captureToken = randomUUID();
+        const admitted = await this.queue.transaction((state) => {
             const previous = state.jobs[requestId];
-            if (!previous || previous.status !== "running")
-                state.jobs[requestId] = { id: requestId, sessionId, hostId: this.port.hostId, workspaceId: this.port.workspaceId, fingerprint: "capture", status: "pending", attempts: 0,
-                    createdAt: previous?.createdAt ?? Date.now(), updatedAt: Date.now(), nextRunAt: Date.now() + this.options.debounceMs, sourceTerminal: terminal };
+            if (previous?.status === "running")
+                return false;
+            state.jobs[requestId] = { id: requestId, sessionId, hostId: this.port.hostId, workspaceId: this.port.workspaceId, fingerprint: "capture", captureToken, status: "pending", attempts: 0,
+                createdAt: previous?.createdAt ?? Date.now(), updatedAt: Date.now(), nextRunAt: Date.now() + this.options.debounceMs, sourceTerminal: terminal };
             state.lastEventAt = Date.now();
+            return true;
         });
+        if (!admitted)
+            return { packets: [], last: result("busy", "capture_busy", "Another worker owns this task capture.") };
+        const currentCapture = (job) => job?.captureToken === captureToken && ["pending", "retry"].includes(job.status);
+        const cancelledCapture = () => ({ packets: [], last: result("cancelled", "task_revised", "Task evidence was superseded during capture.") });
         const controller = signal ? undefined : new AbortController();
         const usedSignal = signal ?? controller.signal;
         const timer = controller ? setTimeout(() => controller.abort(new Stop("capture_timeout")), Math.min(10_000, this.options.reviewTimeoutMs)) : undefined;
@@ -182,10 +219,16 @@ export class AutoSkillEngine {
         catch {
             if (signal?.aborted)
                 throw signal.reason;
-            await this.queue.transaction((state) => { const job = state.jobs[requestId]; if (job) {
+            const retried = await this.queue.transaction((state) => {
+                const job = state.jobs[requestId];
+                if (!currentCapture(job))
+                    return false;
                 job.status = "retry";
                 job.nextRunAt = Date.now() + this.options.retryBaseMs;
-            } });
+                return true;
+            });
+            if (!retried)
+                return cancelledCapture();
             return { packets: [], last: await this.note(sessionId, result("queued", "capture_unavailable", "Waiting for a readable completed task boundary."), requestId) };
         }
         finally {
@@ -193,9 +236,14 @@ export class AutoSkillEngine {
                 clearTimeout(timer);
         }
         if (snapshot.sessionId !== sessionId || !this.allowed(snapshot) || !await this.inProject(snapshot)) {
-            await this.queue.transaction((state) => { state.jobs[requestId].status = "skipped"; });
+            const skipped = await this.queue.transaction((state) => { const job = state.jobs[requestId]; if (!currentCapture(job))
+                return false; job.status = "skipped"; return true; });
+            if (!skipped)
+                return cancelledCapture();
             return { packets: [], last: await this.note(sessionId, result("skipped", "outside_scope", "Only top-level tasks in this project are eligible."), requestId) };
         }
+        if (!currentCapture((await this.queue.read()).jobs[requestId]))
+            return cancelledCapture();
         const bookkeeping = new AbortController();
         const bookkeepingTimer = setTimeout(() => bookkeeping.abort(new Stop("reuse_bookkeeping_timeout")), this.options.reuseTimeoutMs);
         const bookkeepingSignal = signal ? AbortSignal.any([signal, bookkeeping.signal]) : bookkeeping.signal;
@@ -224,7 +272,12 @@ export class AutoSkillEngine {
                 sensitive_content: "Task excluded by custom sensitive-content policy.", execution_not_successful: "Task has no successful completed execution.", no_assistant_evidence: "Task has no completed assistant execution evidence." };
             let value = code ? result("skipped", code, reasons[code] ?? "Task did not meet review eligibility requirements.", { taskId: packet.id })
                 : result("queued", "task_queued", "Task evidence is durably queued.", { taskId: packet.id });
+            let revoked = false;
             const inserted = await this.queue.transaction((state) => {
+                if (!currentCapture(state.jobs[requestId])) {
+                    revoked = true;
+                    return false;
+                }
                 const prior = state.jobs[packet.id];
                 const policyChanged = prior?.screeningKey !== this.screeningKey();
                 const canRescreen = prior && prior.status === "skipped" && prior.reasonCode === "below_complexity_threshold" && (policyChanged || manual && force);
@@ -273,12 +326,19 @@ export class AutoSkillEngine {
                         await this.store.recordUsage(id).catch(() => undefined);
                 }
             }
-            last = inserted ? value : result("skipped", "already_reviewed", "Task evidence is already queued or reviewed.", { taskId: packet.id });
+            last = revoked ? result("cancelled", "task_revised", "Task evidence was superseded during capture.", { taskId: packet.id })
+                : inserted ? value : result("skipped", "already_reviewed", "Task evidence is already queued or reviewed.", { taskId: packet.id });
         }
-        await this.queue.transaction((state) => { const request = state.jobs[requestId]; if (request) {
+        const completed = await this.queue.transaction((state) => {
+            const request = state.jobs[requestId];
+            if (!currentCapture(request))
+                return false;
             request.status = "skipped";
             request.reasonCode = "capture_complete";
-        } });
+            return true;
+        });
+        if (!completed)
+            return cancelledCapture();
         return { packets, last };
     }
     review(sessionId, force = false, signal, dryRun = false) {
@@ -345,6 +405,12 @@ export class AutoSkillEngine {
         }
         await this.reconcile((await this.queue.recover()).publications);
         const waiting = Object.values((await this.queue.read()).jobs).filter((job) => this.ownsJob(job) && ["pending", "retry"].includes(job.status)).sort((a, b) => a.nextRunAt - b.nextRunAt || a.createdAt - b.createdAt);
+        // A manual review or host capture can start while recovery/read awaited I/O.
+        // Do not let an older drain turn recapture its newly created placeholder.
+        if (this.active || this.manual || this.collections.size) {
+            this.wake(100);
+            return;
+        }
         const job = waiting[0];
         if (!job)
             return;
@@ -384,10 +450,12 @@ export class AutoSkillEngine {
         const local = await bounded(this.store.list(), signal);
         const remote = await bounded(this.port.listSkills(signal), signal);
         const reuseStats = await bounded(this.reuse.ledger.history(), signal);
-        const merged = new Map(remote.map((skill) => [skill.id, { ...skill, managed: false }]));
+        const merged = new Map(remote.filter(skill => !local.some(source => source.ownership === "managed" && source.path === skill.path))
+            .map((skill) => [skill.id, { ...skill, managed: false }]));
         for (const skill of local) {
             const stats = reuseStats.find((item) => item.skillId === skill.id && item.sha256 === skill.sha256);
-            merged.set(skill.id, { ...skill, feedback: { success: (skill.versionFeedback?.success ?? 0) + (stats?.userFeedback.success ?? 0), failure: (skill.versionFeedback?.failure ?? 0) + (stats?.userFeedback.failure ?? 0) },
+            merged.set(skill.id, { ...skill, managed: skill.managed && !compatibilityReasons(skill, this.port.compatibilityHostId ?? this.port.hostId, this.port.hostCapabilities).length,
+                feedback: { success: (skill.versionFeedback?.success ?? 0) + (stats?.userFeedback.success ?? 0), failure: (skill.versionFeedback?.failure ?? 0) + (stats?.userFeedback.failure ?? 0) },
                 reuseFeedback: stats ? { loaded: stats.loaded, reportedUsed: stats.reportedUsed, user: stats.userFeedback, model: stats.modelFeedback } : undefined });
         }
         return [...merged.values()];
@@ -459,7 +527,8 @@ export class AutoSkillEngine {
             if (this.options.providerAllowlist.length && (!model || !this.options.providerAllowlist.includes(model.providerID)))
                 return this.complete(job, token, result("skipped", "provider_excluded", "Review provider is excluded by privacy policy."), "skipped");
             const existing = await this.skills(signal);
-            const input = await bounded(buildReviewInput(snapshot, existing, this.options, this.root, { preScreen }), signal);
+            const input = await bounded(buildReviewInput(snapshot, existing, this.options, this.root, { preScreen,
+                hostId: this.port.compatibilityHostId ?? this.port.hostId, hostCapabilities: this.port.hostCapabilities }), signal);
             if (!input.hasUserTask || [...input.evidence.values()].filter((tool) => tool.status === "completed" && tool.output.trim()).length < 2)
                 return this.complete(job, token, result("skipped", "insufficient_evidence", "Insufficient independent successful tool evidence."), "skipped");
             const budget = await this.queue.transaction((state) => {
@@ -615,7 +684,7 @@ export class AutoSkillEngine {
                 capabilities: state.capabilities, lastEventAt: state.lastEventAt, lastDecision: state.lastDecision,
                 budget: { day: state.day, reviews: state.reviews, limit: this.options.maxReviewsPerDay, estimatedInputTokens: state.inputTokens ?? 0,
                     estimatedInputTokenLimit: this.options.maxEstimatedTokensPerDay, global: await this.global.read() },
-                jobs: Object.values(state.jobs).map(({ id, sessionId, status, attempts, reasonCode, nextRunAt, publication, preScreen }) => ({ id, sessionId, status, attempts, reasonCode, nextRunAt, publication: publication?.stage,
+                jobs: Object.values(state.jobs).map(({ id, sessionId, hostId, workspaceId, status, attempts, reasonCode, nextRunAt, publication, preScreen }) => ({ id, sessionId, hostId, workspaceId, status, attempts, reasonCode, nextRunAt, publication: publication?.stage,
                     preScreen: preScreen ? { eligible: preScreen.eligible, score: preScreen.score,
                         version: preScreen.version, dimensions: preScreen.dimensions,
                         reasonCodes: preScreen.reasonCodes } : undefined })),
@@ -632,11 +701,11 @@ export class AutoSkillEngine {
         if (!this.disposed)
             await this.reuse.prepare(request);
     }
-    async reuseContext(sessionId, signal, messageId, queryHash) {
+    async reuseContext(sessionId, signal, messageId, queryHash, originalText) {
         await this.ready;
         signal?.throwIfAborted();
         if (!this.disposed)
-            return this.reuse.context(sessionId, signal, messageId, queryHash);
+            return this.reuse.context(sessionId, signal, messageId, queryHash, originalText);
     }
     async loadReuse(input) {
         await this.ready;

@@ -1,6 +1,6 @@
 import * as fs from "node:fs/promises";
-import { setTimeout as delay } from "node:timers/promises";
 import { openSqlite, beginImmediate } from "./sqlite.js";
+import { checkOperation, operationDelay } from "./operation-context.js";
 
 export class LockInspectionError extends Error {
   readonly code = "AUTOSKILL_LOCK_NEEDS_INSPECTION";
@@ -22,6 +22,7 @@ export async function acquireFileLock(
 ): Promise<(() => Promise<void>) | undefined> {
   const deadline = Date.now() + Math.max(0, waitMs);
   while (true) {
+    checkOperation();
     await prepare();
     try {
       const stat = await fs.lstat(file);
@@ -32,7 +33,7 @@ export async function acquireFileLock(
         text = await fs.readFile(file, "utf8");
         try { owner = JSON.parse(text); break; } catch {
           if (attempt === 4) throw new LockInspectionError(file, "invalid owner record");
-          await delay(10);
+          await operationDelay(10);
         }
       }
       owner ??= {};
@@ -46,7 +47,7 @@ export async function acquireFileLock(
         break;
       }
       if (Date.now() >= deadline) return undefined;
-      await delay(Math.min(15, Math.max(1, deadline - Date.now())));
+      await operationDelay(Math.min(15, Math.max(1, deadline - Date.now())));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") break;
       throw error;

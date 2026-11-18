@@ -6,6 +6,7 @@ import { acquireFileLock } from "./lock.js";
 import { redact, redactValue } from "./safety.js";
 import { PLUGIN_VERSION } from "./version.js";
 import { resolveStorageLayout } from "./storage-layout.js";
+import { normalizeCompatibility, constrainNativeSkill } from "./compatibility.js";
 const MAX_CONTENT_CHARS = 64_000;
 const MAX_FILE_BYTES = 256_000;
 const MAX_BACKUPS = 10;
@@ -50,10 +51,17 @@ function frontmatter(content) {
 function metadata(content) {
     const { data, body } = frontmatter(content);
     const meta = data.metadata && typeof data.metadata === "object" && !Array.isArray(data.metadata) ? data.metadata : {};
+    let compatibility, compatibilityInvalid;
+    try {
+        compatibility = normalizeCompatibility(meta["autoskill-compatibility"]);
+    }
+    catch {
+        compatibilityInvalid = true;
+    }
     return { name: typeof data.name === "string" ? data.name : undefined,
         title: typeof meta["autoskill-title"] === "string" ? meta["autoskill-title"] : /^#\s+(.+)$/m.exec(body)?.[1],
         description: typeof data.description === "string" ? data.description : undefined, marked: meta.autoskill === true,
-        version: typeof meta["autoskill-revision"] === "string" ? meta["autoskill-revision"] : undefined };
+        version: typeof meta["autoskill-revision"] === "string" ? meta["autoskill-revision"] : undefined, compatibility, compatibilityInvalid };
 }
 function textArray(values, label, required) {
     if (!Array.isArray(values) || required && values.length === 0 || values.length > 100)
@@ -71,7 +79,9 @@ function renderSkill(skill, version) {
     if (typeof skill.description !== "string" || !skill.description.trim() || skill.description.length > 2_000 || skill.description.includes("\0"))
         throw new Error("Invalid skill description.");
     const title = skill.name.trim().replace(/[\r\n]+/g, " ");
-    const output = ["---", `name: ${JSON.stringify(skill.id)}`, `description: ${JSON.stringify(skill.description.trim())}`, "metadata:", "  autoskill: true", "  autoskill-version: 2", `  autoskill-title: ${JSON.stringify(title)}`, `  autoskill-revision: ${JSON.stringify(version)}`, "---", "", `# ${title}`];
+    const compatibility = constrainNativeSkill(skill);
+    const output = ["---", `name: ${JSON.stringify(skill.id)}`, `description: ${JSON.stringify(skill.description.trim())}`, "metadata:", "  autoskill: true", "  autoskill-version: 2", `  autoskill-title: ${JSON.stringify(title)}`, `  autoskill-revision: ${JSON.stringify(version)}`,
+        ...(compatibility ? [`  autoskill-compatibility: ${JSON.stringify(compatibility)}`] : []), "---", "", `# ${title}`];
     const sections = [
         ["When to use", textArray(skill.whenToUse, "whenToUse", true), false], ["Prerequisites", textArray(skill.prerequisites, "prerequisites", false), false],
         ["Procedure", textArray(skill.steps, "steps", true), true], ["Pitfalls", textArray(skill.pitfalls, "pitfalls", false), false], ["Verification", textArray(skill.verification, "verification", true), false]
@@ -216,6 +226,7 @@ export class SkillStore {
         const ownership = !meta.marked ? "unmanaged" : source?.skillSha256 === sha256 ? "managed" : "user-modified", title = meta.title ?? meta.name ?? id;
         return { id, name: title, title, description: meta.description ?? "", path: file, content: body.slice(0, MAX_CONTENT_CHARS), contentComplete: body.length <= MAX_CONTENT_CHARS,
             managed: ownership === "managed" && !archived && !control.pinned, ownership, sha256, generatedHash: source?.skillSha256, pinned: control.pinned === true,
+            compatibility: meta.compatibility, compatibilityInvalid: meta.compatibilityInvalid,
             archived, version: source?.version ?? meta.version, updatedAt: source?.createdAt, usageCount: control.usageCount ?? 0, lastUsedAt: control.lastUsedAt,
             feedback: control.feedback ?? { success: 0, failure: 0 }, versionFeedback: control.feedbackSha256 === sha256 ? control.versionFeedback : { success: 0, failure: 0 } };
     }
@@ -544,6 +555,8 @@ export class SkillStore {
             const previous = await fs.readFile(current.path, "utf8");
             if (hash(previous) !== current.sha256)
                 throw new SkillConflictError("Skill changed before adoption.");
+            if (metadata(previous).compatibilityInvalid)
+                throw new Error("Invalid compatibility metadata must be corrected before adoption.");
             await this.backup(id, previous, await this.source(id, current.path));
             const parsed = frontmatter(previous), version = newVersion(), meta = parsed.data.metadata && typeof parsed.data.metadata === "object" && !Array.isArray(parsed.data.metadata) ? parsed.data.metadata : {};
             const data = { ...parsed.data, name: id, metadata: { ...meta, autoskill: true, "autoskill-version": 2, "autoskill-title": current.title, "autoskill-revision": version } };

@@ -4,6 +4,7 @@ import { type HostId } from "../adapters/events.js";
 import { readPortableConfig } from "./install.js";
 import { reviewerStatus } from "./reviewer.js";
 import { EventStore, type PortableTask } from "./event-store.js";
+export declare const HOOK_DEADLINE_MS = 2000;
 export declare class PortableRuntime {
     readonly root: string;
     readonly host: HostId;
@@ -18,6 +19,7 @@ export declare class PortableRuntime {
         automaticReuse?: boolean;
     }): Promise<PortableRuntime>;
     private prepare;
+    private activate;
     context(task: PortableTask, signal?: AbortSignal): Promise<string>;
     resolveTask(token: unknown): Promise<PortableTask>;
     search(query: string, token?: unknown, signal?: AbortSignal): Promise<unknown>;
@@ -34,7 +36,7 @@ export declare class PortableRuntime {
     close(): Promise<void>;
 }
 export declare function readStdinJson(maxBytes?: number): Promise<unknown>;
-export declare function runRuntimeCommand(input: {
+declare function executeRuntimeCommand(input: {
     command: string;
     host: HostId;
     root: string;
@@ -42,3 +44,5 @@ export declare function runRuntimeCommand(input: {
     input?: unknown;
     dryRun?: boolean;
 }): Promise<unknown>;
+export declare function runRuntimeCommand(input: Parameters<typeof executeRuntimeCommand>[0]): Promise<unknown>;
+export {};

@@ -60,7 +60,7 @@ export function collectTasks(snapshot: TaskSnapshot, options: AutoSkillOptions, 
   for (let index = 0; index < segments.length; index++) {
     const segment = segments[index]!;
     const anchor = segment.find((message) => message.role === "user")!;
-    const taskId = snapshot.hostId ? digest([snapshot.hostId, snapshot.workspaceId ?? root, snapshot.sessionId, snapshot.turnId ?? "", anchor.id, snapshot.revision ?? ""]) : digest([snapshot.sessionId, anchor.id]);
+    const taskId = snapshot.hostId ? digest([snapshot.hostId, snapshot.workspaceId ?? root, snapshot.sessionId, snapshot.turnId ?? "", anchor.id]) : digest([snapshot.sessionId, anchor.id]);
     const rawTools = segment.flatMap((message) => message.tools);
     const boundary = snapshot.taskBoundaries?.find((item) => item.messageId === anchor.id);
     const terminal = boundary?.terminal ?? (index === segments.length - 1 ? snapshot.terminal : snapshot.hostId ? "unknown" : "success");
@@ -96,7 +96,7 @@ export function collectTasks(snapshot: TaskSnapshot, options: AutoSkillOptions, 
       const reasonCode = sensitiveText.matched ? "sensitive_content" : pending ? "unfinished_tools" : !completed ? "execution_not_successful" : !segment.some((message) => message.role === "assistant") ? "no_assistant_evidence" : undefined;
       // Include terminal outcome and eligibility so a later successful retry
       // cannot be hidden by a failed/unfinished packet tombstone.
-      const fingerprint = snapshot.hostId ? digest([taskId, part, terminal, executionCompleted, eligible, reasonCode, messages]) : digest([taskId, part, terminal, eligible, reasonCode, messages]);
+      const fingerprint = snapshot.hostId ? digest([taskId, snapshot.revision ?? "", part, terminal, executionCompleted, eligible, reasonCode, messages]) : digest([taskId, part, terminal, eligible, reasonCode, messages]);
       packets.push({ id: digest([taskId, part, fingerprint]), taskId, anchorId: anchor.id, fingerprint, snapshot: packetSnapshot,
         coverage: chunk.map((tool) => tool.id), eligible, reasonCode });
     }

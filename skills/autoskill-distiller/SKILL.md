@@ -1,6 +1,6 @@
 ---
 name: autoskill-distiller
-description: Distill verified completed OpenCode tasks into reusable project skills, using observed execution evidence and existing skill metadata.
+description: Distill verified completed agent tasks into reusable project skills, using observed execution evidence and existing skill metadata.
 ---
 
 # Distill a completed task
@@ -17,13 +17,15 @@ For reuse value, independently explain the transferable trigger/decision rule, w
 
 Identify the user's goal, the non-obvious procedure, failed approaches and why they failed, the successful resolution, and observed verification. Preserve only knowledge supported by the evidence. Do not invent commands, outcomes, flags, versions, paths, tools, or verification steps. Prefer transferable decision rules over replaying a conversation. Replace project-specific paths with placeholders. Omit secrets, private data, identities and transient logs.
 
-Compare the candidate with every listed existing skill. If equivalent coverage already exists and there is no useful new verified method, skip. If an existing managed skill covers the same topic and new evidence improves it, update that exact id, retaining its useful prior instructions. Never update an unmanaged skill. Avoid making several near-duplicate skills for one procedure. A different id is not a reason to create a duplicate.
+Compare every listed existing skill. Skip equivalent coverage without verified improvements. For new evidence improving the same topic, update the exact managed id and preserve useful prior instructions. Never update unmanaged skills or create near-duplicates under another id.
 
-Existing-skill reuse feedback may identify an improvement worth investigating. User reports and model reports are distinct; loaded counts and overall task outcomes are not causal evidence of usefulness. Improve a method only when this task's actual tool evidence verifies the change. Feedback alone cannot justify rewriting or deleting a procedure.
+Feedback distinguishes user reports from model reports. Loaded counts and task outcomes do not establish usefulness. Only this task's verified tool evidence can justify improving a skill; feedback alone cannot justify rewriting or deletion.
 
 The resulting skill must say when to use it, its prerequisites, actionable steps, pitfalls, and how to verify success. Include at least two steps. Its description should contain concrete task triggers for future retrieval. Use a short lowercase kebab-case id, at most 64 characters. Write content in the requested output language, retaining technical identifiers as needed.
 
-Supply at least one exact excerpt from an observed tool output supporting the procedure and one from a DIFFERENT completed tool output supporting verification. Each excerpt must contain at least 4 characters when it contains Chinese text, otherwise at least 8, and at most 1000 characters. It must occur verbatim in that tool's output, including whitespace. Failed tool output can explain a pitfall, but cannot verify success. Verification must actually check the result: for example passing relevant tests, reading back a changed setting, or cross-checking independent source data for an investigation. Writing a file or echoing success text does not independently verify the result. Do not cite an unrelated successful command as verification.
+Optional `skill.compatibility` declares requirements: `hosts` uses `opencode|claude-code|codex|gemini|cursor|generic`; `requiredCapabilities` uses lowercase IDs from host-environment. Native API methods require their host; `@opencode/plugin` and `ctx.session/experimental.generate` require `hosts:["opencode"]`. Never invent capabilities or multi-host support. Ordinary project/shell methods need no host restriction. Missing metadata declares no restriction, without claiming universal validation. Keep prerequisites and checks in the body.
+
+Require procedure evidence and verification from a DIFFERENT completed tool. Excerpts must occur verbatim (including whitespace), contain 4+ characters with Chinese text or 8+ otherwise, and at most 1000. Failed outputs can support pitfalls, not success. Verification must check the result through relevant tests, readback, or independent sources; file writes, echoed success, and unrelated checks are insufficient.
 
 Return exactly one JSON object, without Markdown fences or any additional text:
 

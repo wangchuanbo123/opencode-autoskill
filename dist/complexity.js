@@ -9,14 +9,21 @@ const coordinationOutput = /(?:producer|consumer|contract|schema|protocol|serial
 const mechanicalError = /(?:command not found|not recognized as (?:an? )?(?:internal|command)|unknown (?:option|argument)|unrecognized (?:option|argument)|is not recognized|拼写|找不到命令|无法识别.{0,20}(?:命令|参数))/i;
 const genericTerms = new Set("command input output result results observed independent regression test tests passed verified verification check checks diagnostic fixture fixtures shell node python npm npx tool tools status completed source root cause identified script scripts file files path paths read inspect run execute code const await return content error errors updated update because only from with that this before after includes include actual expected all the and for use into then".split(" "));
 function textInput(input) {
-    return (typeof input === "string" ? input : JSON.stringify(input ?? null)).slice(0, 80_000);
+    let value = input;
+    if (value && typeof value === "object") {
+        if ("command" in value && typeof value.command === "string")
+            value = value.command;
+        else if ("cmd" in value && typeof value.cmd === "string")
+            value = value.cmd;
+    }
+    return (typeof value === "string" ? value : JSON.stringify(value ?? null)).slice(0, 80_000);
 }
 function transformation(tool, input, code) {
-    if (transformAction.test(tool.name))
+    if (tool.category === "write" || transformAction.test(tool.nativeName ?? tool.name))
         return true;
     if (code)
         return /\b(?:tools|functions|mcp)\.[\w$]*(?:write|edit|patch|migrat|repair|convert|transform)[\w$]*\s*\(|\bawait\s+[\w$]*(?:write|edit|patch|migrat|repair|convert|transform)[\w$]*\s*\(/i.test(input);
-    const command = tool.input && typeof tool.input === "object" && "command" in tool.input ? String(tool.input.command) : input;
+    const command = textInput(tool.input);
     // A test name such as "migration-lock" is a subject, not a mutation. Only
     // executable mutation actions/scripts qualify when the outer tool is generic.
     return /(?:^|[;&|\n]\s*)(?:\s*(?:git\s+apply|sed\s+-i|perl\s+-[a-z]*i|(?:set|add)-content|(?:cp|mv|copy|move)\s))|\b(?:npm|pnpm|yarn)\s+(?:run\s+)?(?:migrate|migration|db:migrate)\b|(?:^|[\s/\\])(?:migrate|repair|convert|transform)[\w.-]*\.(?:[cm]?[jt]s|py|sh|ps1)\b/i.test(command);
@@ -95,15 +102,15 @@ function codeDataDependency(input) {
 }
 function observe(tool, index) {
     const input = textInput(tool.input), output = tool.output.slice(0, 30_000);
-    const action = `${tool.name} ${input}`;
+    const action = `${tool.nativeName ?? tool.name} ${input}`;
     const code = /^(?:execute|codemode)$/i.test(tool.name);
     const decision = tool.status === "completed" && substantive(output) && decisionOutput.test(output);
     const transform = transformation(tool, input, code);
     // A logged success string from echo/printf cannot turn an operation into a check.
     const echoed = /\b(?:echo|printf|write-output)\b[^\n]{0,160}(?:passed|verified|validated|测试通过|验证通过)/i.test(input);
     const verify = tool.status === "completed" && substantive(output) && !echoed &&
-        verifyAction.test(action) && verifiedOutput.test(output) && (!transform || code);
-    const inspect = inspectAction.test(action) || decision && !transform && !verify;
+        (verifyAction.test(action) || tool.category === "verify") && verifiedOutput.test(output) && (!transform || code);
+    const inspect = tool.category === "read" || tool.category === "search" || inspectAction.test(action) || decision && !transform && !verify;
     const sourceCode = tool.input && typeof tool.input === "object" && "code" in tool.input ? String(tool.input.code) : input;
     const codeDependency = code && inspect && transform && codeDataDependency(sourceCode);
     return { tool, index, input, output, key: createHash("sha256").update(`${tool.name.toLowerCase()}\0${input.replace(/\s+/g, " ").trim()}`).digest("hex"),

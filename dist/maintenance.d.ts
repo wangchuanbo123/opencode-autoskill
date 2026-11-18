@@ -6,4 +6,6 @@ export declare function cleanEvidence(root: string, options?: {
     dryRun: boolean;
     jobs: number;
     files: number;
+    eventTasks?: number;
+    eventReceipts?: number;
 }>;

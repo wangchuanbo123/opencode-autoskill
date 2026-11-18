@@ -122,14 +122,16 @@ export function baseHook(host: HostId, input: HookInput, session?: unknown, turn
   if (cwd === undefined || !cwd.trim() || typeof input.cwd !== "string" || input.cwd.length > 32_768 || input.cwd.includes("\0")) throw new Error(`Invalid ${host} hook working directory.`);
   const turnId = identifier(turn ?? input.turn_id ?? input.prompt_id);
   const agentId = identifier(input.agent_id);
-  const parentId = identifier(input.parent_session_id ?? input.parent_id);
+  const parentId = identifier(input.parent_session_id ?? input.parent_thread_id ?? input.parent_id);
   return { host, sessionId, turnId, messageId: identifier(input.message_id ?? input.prompt_id), cwd, eventName,
     eventId: identifier(input.hook_event_id ?? input.event_id), kind: "ignored", agentId, parentId,
     origin: hookOrigin(input), coverage: { source: "hook", transcript: "not-read", tools: "none", reasons: [] } };
 }
 export function hookOrigin(input: HookInput): NormalizedHook["origin"] {
   const source = input.source ?? input.origin ?? input.prompt_source;
-  if (input.agent_id || /subagent|teammate|agent[-_ ]report/i.test(String(source ?? ""))) return "subagent";
+  // Agent IDs can identify a root agent on other hosts. Only explicit ancestry
+  // or source metadata establishes child origin in this shared normalizer.
+  if (input.is_subagent === true || input.parent_session_id || input.parent_thread_id || input.parent_id || /subagent|teammate|agent[-_ ]report/i.test(String(source ?? ""))) return "subagent";
   if (/schedule|cron|loop|internal|maintenance|continuation|hook/i.test(String(source ?? ""))) return "maintenance";
   if (source === "user" || source === "human") return "user";
   return "unknown";
@@ -153,11 +155,17 @@ export function normalizedTool(event: NormalizedHook, input: HookInput, output: 
   const nativeId = identifier(input.tool_use_id ?? input.tool_call_id ?? input.call_id);
   const decoded = decodeOutput(output);
   const obj = record(decoded);
-  const exit = obj?.exit_code ?? obj?.exitCode ?? obj?.exit;
+  const metadata = record(obj?.metadata);
+  const nativeExit = obj?.exit_code ?? obj?.exitCode ?? obj?.exit ?? metadata?.exit_code ?? metadata?.exitCode;
+  const renderedExit = typeof decoded === "string" ? /(?:^|\n)(?:Process exited with code |Exit code:\s*)(-?\d+)(?:\s|$)/.exec(decoded) : undefined;
+  const exit = typeof nativeExit === "number" ? nativeExit : renderedExit ? Number(renderedExit[1]) : undefined;
   const error = obj?.error;
   const interrupted = input.is_interrupt === true || obj?.interrupted === true;
+  const execute = toolCategory(name) === "execute";
+  const asyncProcess = execute && exit === undefined && (obj?.session_id !== undefined && obj.session_id !== null || obj?.backgroundTaskId || obj?.background_task_id ||
+    typeof decoded === "string" && /(?:^|\n)(?:Process running with session ID |Script running with cell ID |(?:Command )?running in (?:the )?background)/i.test(decoded));
   const status: ToolRecord["status"] = failed || interrupted || obj?.isError === true || typeof exit === "number" && exit !== 0 || error !== undefined && error !== null && error !== false && error !== "" ? "error"
-    : obj?.status === "running" || obj?.status === "pending" || obj?.redacted === true ? "pending" : "completed";
+    : asyncProcess || obj?.status === "running" || obj?.status === "pending" || obj?.status === "in_progress" || obj?.redacted === true || output === undefined || output === null ? "pending" : "completed";
   const identity = nativeId ?? `unidentified-${randomUUID()}`;
   const id = `${event.host}:${createHash("sha256").update(JSON.stringify([event.sessionId, event.turnId ?? "", event.agentId ?? "", identity])).digest("hex")}`;
   const outputText = toolOutput(output);
@@ -169,6 +177,7 @@ export function normalizedTool(event: NormalizedHook, input: HookInput, output: 
   if (!nativeId) event.coverage.reasons.push("missing_tool_call_id");
   if (output === undefined && !errorText) event.coverage.reasons.push("missing_tool_output");
   if (obj?.redacted === true) event.coverage.reasons.push("tool_output_redacted");
+  if (asyncProcess) event.coverage.reasons.push("process_still_running");
   if (typeof output === "string" && output.length > MAX_HOOK_TEXT) event.coverage.reasons.push("tool_output_truncated");
   return event;
 }

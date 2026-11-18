@@ -224,15 +224,45 @@ test("reuse tool calls forward cancellation and distinguish reported use from lo
 
 test("a reuse deadline aborts uncooperative indexing and leaves the primary request unchanged", async () => {
   const f = harness({ reuseTimeoutMs: 100 });
+  const logs: string[] = [];
   let signal: AbortSignal | undefined;
   f.engine.prepareReuse = async (input: any) => { signal = input.signal; await new Promise(() => {}); };
-  const cleanup = await setupAdapter(f.ctx, () => f.engine);
+  const cleanup = await setupAdapter(f.ctx, (port: any) => { port.log = (_level: string, message: string) => logs.push(message); return f.engine; });
   try {
     const input = f.prompt(); const before = structuredClone(input);
     const start = Date.now(); await f.hooks.get("prompt")!(input);
     assert.ok(Date.now() - start < 1_000); assert.equal(signal!.aborted, true);
     assert.deepEqual(input, before);
+    assert.equal(logs.length, 1);
+    assert.match(logs[0]!, /hook=prompt reason=timeout elapsedMs=\d+$/);
+    assert.doesNotMatch(logs[0]!, /Investigate the cache issue|user-first|session|AutoSkill reuse timed out/);
   } finally { await cleanup(); }
+});
+
+test("reuse hook diagnostics classify failures without exposing exception details or task data", async () => {
+  const sensitive = "PRIVATE_TASK_SECRET D:\\private\\workspace\\evidence.txt";
+  for (const [stage, fields, category] of [
+    ["prompt", {}, "operation_failed"],
+    ["context", { name: sensitive, code: sensitive }, "operation_failed"],
+    ["context", { code: "SQLITE_BUSY" }, "sqlite_busy"],
+    ["prompt", { errcode: 6 }, "sqlite_busy"],
+    ["context", { code: "EACCES" }, "eacces"],
+    ["prompt", { name: "AbortError" }, "aborted"],
+  ] as const) {
+    const f = harness(); const logs: string[] = [];
+    const error = Object.assign(new Error(sensitive), fields, { stack: sensitive });
+    f.engine[stage === "prompt" ? "prepareReuse" : "reuseContext"] = async () => { throw error; };
+    const cleanup = await setupAdapter(f.ctx, (port: any) => { port.log = (_level: string, message: string) => logs.push(message); return f.engine; });
+    try {
+      const input = stage === "prompt" ? f.prompt() : f.context();
+      const before = structuredClone(input);
+      await f.hooks.get(stage)!(input);
+      assert.deepEqual(input, before);
+      assert.equal(logs.length, 1);
+      assert.match(logs[0]!, new RegExp(`hook=${stage} reason=${category} elapsedMs=\\d+$`));
+      assert.doesNotMatch(logs[0]!, /PRIVATE_TASK_SECRET|private|evidence\.txt|Investigate the cache issue|Current user task|user-first|session/);
+    } finally { await cleanup(); }
+  }
 });
 
 test("cleanup cancels pending reuse hooks and disposes each registration once", async () => {

@@ -1,6 +1,6 @@
 import type { Plugin } from "@opencode/plugin";
 import { AutoSkillEngine } from "../../engine.js";
-import type { EnginePort, HostCapabilities, TaskSnapshot } from "../../types.js";
+import type { EnginePort, ExistingSkill, HostCapabilities, TaskSnapshot } from "../../types.js";
 type SessionInfo = Awaited<ReturnType<Plugin.Context["session"]["get"]>>;
 type SessionRecords = Awaited<ReturnType<Plugin.Context["session"]["context"]>>;
 export type AdapterEngine = Pick<AutoSkillEngine, "schedule" | "review" | "status" | "dispose"> & {
@@ -10,7 +10,7 @@ export type AdapterEngine = Pick<AutoSkillEngine, "schedule" | "review" | "statu
         text: string;
         signal?: AbortSignal;
     }): Promise<void>;
-    reuseContext?(sessionId: string, signal?: AbortSignal, messageId?: string, queryHash?: string): Promise<{
+    reuseContext?(sessionId: string, signal?: AbortSignal, messageId?: string, queryHash?: string, originalText?: string): Promise<{
         text: string;
         candidateIds: string[];
         catalog?: {
@@ -38,6 +38,8 @@ export type AdapterEngine = Pick<AutoSkillEngine, "schedule" | "review" | "statu
     }): Promise<unknown>;
 };
 export type EngineFactory = (port: EnginePort) => AdapterEngine;
+/** Recognize exact, unchanged native exports without taking ownership of user files. */
+export declare function resolveManagedSkillAliases(root: string, skills: ExistingSkill[]): Promise<ExistingSkill[]>;
 /** Guard the experimental API contract before starting background work. */
 export declare function detectCapabilities(ctx: Plugin.Context): HostCapabilities;
 /** Reuse has an independent admission/context API contract; distillation can remain available. */

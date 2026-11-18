@@ -1,5 +1,6 @@
 import { PLUGIN_VERSION } from "../version.js";
 import type { PortableRuntime } from "../portable/runtime.js";
+import { StringDecoder } from "node:string_decoder";
 
 type Json = Record<string, unknown>;
 const string = { type: "string", minLength: 1, maxLength: 128 };
@@ -44,13 +45,22 @@ export async function serveMcp(runtime: PortableRuntime, input: NodeJS.ReadableS
   const send = (value: unknown) => output.write(JSON.stringify(value) + "\n");
   let initialized = false, buffer = "", serial = Promise.resolve();
   const active = new Map<string | number, AbortController>();
+  const cancelled = new Set<string | number>();
+  const decoder = new StringDecoder("utf8");
   const handle = async (request: Json) => {
     const id = request.id as string | number | undefined;
     const response = (result: unknown) => { if (id !== undefined) send({ jsonrpc: "2.0", id, result }); };
     const fail = (code: number, message: string) => { if (id !== undefined) send({ jsonrpc: "2.0", id, error: { code, message } }); };
     if (request.jsonrpc !== "2.0" || typeof request.method !== "string") { fail(-32600, "Invalid Request"); return; }
+    if (id !== undefined && typeof id !== "string" && typeof id !== "number") { send({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid request ID" } }); return; }
     const params = request.params as Json | undefined;
-    if (request.method === "notifications/cancelled") { active.get(params?.requestId as string | number)?.abort(); return; }
+    if (request.method === "notifications/cancelled") {
+      const target = params?.requestId;
+      if (typeof target === "string" || typeof target === "number") {
+        const controller = active.get(target); if (controller) controller.abort(); else if (cancelled.size < 1024) cancelled.add(target);
+      }
+      return;
+    }
     if (request.method.startsWith("notifications/")) return;
     if (request.method === "initialize") {
       if (initialized) { fail(-32600, "Already initialized"); return; }
@@ -65,15 +75,17 @@ export async function serveMcp(runtime: PortableRuntime, input: NodeJS.ReadableS
     if (request.method === "resources/list" || request.method === "resources/templates/list" || request.method === "prompts/list") { response({ [request.method === "prompts/list" ? "prompts" : request.method === "resources/list" ? "resources" : "resourceTemplates"]: [] }); return; }
     if (request.method !== "tools/call") { fail(-32601, "Method not found"); return; }
     const controller = new AbortController(); if (id !== undefined) active.set(id, controller);
+    if (id !== undefined && cancelled.delete(id)) controller.abort();
     const timer = setTimeout(() => controller.abort(), 100_000);
     try {
+      controller.signal.throwIfAborted();
       const result = await callMcpTool(runtime, String(params?.name), params?.arguments ?? {}, controller.signal);
       response({ content: [{ type: "text", text: JSON.stringify(result) }], ...(result && typeof result === "object" && !Array.isArray(result) ? { structuredContent: result } : {}) });
     } catch (error) { response({ isError: true, content: [{ type: "text", text: error instanceof Error ? error.message : "AutoSkill tool failed." }] }); }
     finally { clearTimeout(timer); if (id !== undefined) active.delete(id); }
   };
   for await (const chunk of input) {
-    buffer += chunk.toString();
+    buffer += typeof chunk === "string" ? chunk : decoder.write(chunk);
     if (Buffer.byteLength(buffer) > 1_048_576) throw new Error("MCP input exceeds 1 MiB.");
     let newline: number;
     while ((newline = buffer.indexOf("\n")) >= 0) {

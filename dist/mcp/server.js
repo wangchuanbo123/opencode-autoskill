@@ -1,4 +1,5 @@
 import { PLUGIN_VERSION } from "../version.js";
+import { StringDecoder } from "node:string_decoder";
 const string = { type: "string", minLength: 1, maxLength: 128 };
 const token = { type: "string", minLength: 36, maxLength: 36, description: "Opaque task contextToken from this task's hook or autoskill_search response." };
 const schema = (properties, required = []) => ({ type: "object", properties, required, additionalProperties: false });
@@ -49,6 +50,8 @@ export async function serveMcp(runtime, input = process.stdin, output = process.
     const send = (value) => output.write(JSON.stringify(value) + "\n");
     let initialized = false, buffer = "", serial = Promise.resolve();
     const active = new Map();
+    const cancelled = new Set();
+    const decoder = new StringDecoder("utf8");
     const handle = async (request) => {
         const id = request.id;
         const response = (result) => { if (id !== undefined)
@@ -59,9 +62,20 @@ export async function serveMcp(runtime, input = process.stdin, output = process.
             fail(-32600, "Invalid Request");
             return;
         }
+        if (id !== undefined && typeof id !== "string" && typeof id !== "number") {
+            send({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid request ID" } });
+            return;
+        }
         const params = request.params;
         if (request.method === "notifications/cancelled") {
-            active.get(params?.requestId)?.abort();
+            const target = params?.requestId;
+            if (typeof target === "string" || typeof target === "number") {
+                const controller = active.get(target);
+                if (controller)
+                    controller.abort();
+                else if (cancelled.size < 1024)
+                    cancelled.add(target);
+            }
             return;
         }
         if (request.method.startsWith("notifications/"))
@@ -101,8 +115,11 @@ export async function serveMcp(runtime, input = process.stdin, output = process.
         const controller = new AbortController();
         if (id !== undefined)
             active.set(id, controller);
+        if (id !== undefined && cancelled.delete(id))
+            controller.abort();
         const timer = setTimeout(() => controller.abort(), 100_000);
         try {
+            controller.signal.throwIfAborted();
             const result = await callMcpTool(runtime, String(params?.name), params?.arguments ?? {}, controller.signal);
             response({ content: [{ type: "text", text: JSON.stringify(result) }], ...(result && typeof result === "object" && !Array.isArray(result) ? { structuredContent: result } : {}) });
         }
@@ -116,7 +133,7 @@ export async function serveMcp(runtime, input = process.stdin, output = process.
         }
     };
     for await (const chunk of input) {
-        buffer += chunk.toString();
+        buffer += typeof chunk === "string" ? chunk : decoder.write(chunk);
         if (Buffer.byteLength(buffer) > 1_048_576)
             throw new Error("MCP input exceeds 1 MiB.");
         let newline;

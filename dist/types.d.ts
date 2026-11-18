@@ -49,6 +49,10 @@ export interface TaskSnapshot {
         executionCompleted?: boolean;
     }[];
 }
+export interface SkillCompatibility {
+    hosts?: string[];
+    requiredCapabilities?: string[];
+}
 export interface SkillContent {
     id: string;
     name: string;
@@ -58,6 +62,7 @@ export interface SkillContent {
     steps: string[];
     pitfalls: string[];
     verification: string[];
+    compatibility?: SkillCompatibility;
 }
 export interface EvidenceCitation {
     toolCallId: string;
@@ -134,6 +139,8 @@ export interface ExistingSkill {
             failure: number;
         };
     };
+    compatibility?: SkillCompatibility;
+    compatibilityInvalid?: boolean;
 }
 export interface ReviewProvenance {
     sessionId: string;
@@ -217,6 +224,10 @@ export interface EnginePort {
     root: string;
     hostId?: string;
     workspaceId?: string;
+    /** Explicit host proof that does not change legacy task IDs. */
+    compatibilityHostId?: string;
+    /** Capabilities observed or configured by the adapter, never assumed from a model name. */
+    hostCapabilities?: string[];
     /** Disable automatic draining in short-lived capture hooks. Manual review remains available. */
     backgroundWorker?: boolean;
     options?: Record<string, unknown>;

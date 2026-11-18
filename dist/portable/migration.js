@@ -2,7 +2,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync, backup } from "node:sqlite";
-import { assertSafePath, defaultPortableConfig, readSafeFile, sha256, writeSafeFile } from "./install.js";
+import { assertSafePath, defaultPortableConfig, ensurePortablePrivate, readSafeFile, sha256, writeSafeFile } from "./install.js";
 async function exists(file) { try {
     await fs.lstat(file);
     return true;
@@ -45,13 +45,23 @@ function live(pid) {
 }
 function inspectQueue(db) {
     const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name));
-    if (!tables.has("jobs"))
-        return;
-    for (const row of db.prepare("SELECT value FROM jobs").all()) {
-        const job = JSON.parse(row.value);
-        if (["pending", "running", "retry"].includes(job.status) || live(job.lease?.pid))
-            throw new Error("Migration requires an offline queue with no pending/running/retry jobs. Stop all hosts and finish or recover the queue before migrating.");
+    if (tables.has("jobs"))
+        for (const row of db.prepare("SELECT value FROM jobs").all())
+            inspectJob(JSON.parse(row.value));
+    if (tables.has("runtime")) {
+        const row = db.prepare("SELECT value FROM runtime WHERE key='state'").get();
+        if (row)
+            inspectJsonQueue(JSON.parse(row.value));
     }
+}
+function inspectJob(job) {
+    if (["pending", "running", "retry"].includes(job?.status) || live(job?.lease?.pid))
+        throw new Error("Migration requires an offline queue with no pending/running/retry jobs. Stop all hosts and finish or recover the queue before migrating.");
+}
+function inspectJsonQueue(value) {
+    if (value?.jobs && typeof value.jobs === "object")
+        for (const job of Object.values(value.jobs))
+            inspectJob(job);
 }
 /** Offline copy migration. Originals remain intact; SQLite snapshots include WAL data. */
 export async function migrateProject(input) {
@@ -62,7 +72,25 @@ export async function migrateProject(input) {
         throw new Error("Portable configuration already exists; migration would replace the authoritative store.");
     const files = [...await walk(root, path.join(root, ".opencode", "skills")), ...await walk(root, path.join(root, ".opencode", "autoskill"))];
     const sources = files.filter(file => !/\.(?:sqlite)-(?:wal|shm|journal)$/.test(file));
-    const plan = sources.map(source => ({ source, target: source.startsWith(path.join(".opencode", "skills") + path.sep) ? path.join(".autoskill", "skills", path.relative(path.join(".opencode", "skills"), source)) : path.join(".autoskill", "runtime", path.relative(path.join(".opencode", "autoskill"), source)) }));
+    const plan = await Promise.all(sources.map(async (source) => {
+        const skillFile = source.startsWith(path.join(".opencode", "skills") + path.sep);
+        let target = skillFile ? path.join(".autoskill", "skills", path.relative(path.join(".opencode", "skills"), source)) : path.join(".autoskill", "runtime", path.relative(path.join(".opencode", "autoskill"), source));
+        if (skillFile && path.basename(source) === "SOURCE.json") {
+            let provenance;
+            try {
+                provenance = JSON.parse(await readSafeFile(path.join(root, source)) ?? "null");
+            }
+            catch { /* An unrelated skill resource is copied unchanged. */ }
+            const id = path.basename(path.dirname(source));
+            if (provenance?.skillId === id && /^[a-f0-9]{64}$/.test(provenance.skillSha256) && (provenance.schemaVersion === 1 || provenance.schemaVersion === 2 || typeof provenance.pluginVersion === "string")) {
+                const authoritative = path.join(".opencode", "autoskill", "provenance", id, "SOURCE.json");
+                target = sources.includes(authoritative) ? path.join(".autoskill", "runtime", "legacy-sidecars", path.relative(path.join(".opencode", "skills"), source)) : path.join(".autoskill", "runtime", "provenance", id, "SOURCE.json");
+            }
+        }
+        return { source, target };
+    }));
+    if (new Set(plan.map(item => item.target)).size !== plan.length)
+        throw new Error("Ambiguous legacy provenance destinations; inspect duplicate skill IDs before migration.");
     for (const item of plan)
         if (await exists(path.join(root, item.target)))
             throw new Error(`Migration destination exists: ${item.target}`);
@@ -76,10 +104,11 @@ export async function migrateProject(input) {
     const id = randomUUID(), staging = path.join(base, `.migration-${id}`), held = [], readers = [];
     const committed = [];
     let manifestWritten = false;
+    const record = { schemaVersion: 1, id, createdAt: new Date().toISOString(), files: [], configHash: "" };
     try {
         await lock.writeFile(JSON.stringify({ pid: process.pid, id, createdAt: new Date().toISOString() }));
+        await ensurePortablePrivate(root);
         await fs.mkdir(staging, { mode: 0o700 });
-        const record = { schemaVersion: 1, id, createdAt: new Date().toISOString(), files: [], configHash: "" };
         for (const item of plan) {
             const source = path.join(root, item.source), target = path.join(staging, path.relative(".autoskill", item.target));
             await assertSafePath(source);
@@ -128,6 +157,16 @@ export async function migrateProject(input) {
                     if (live(owner.pid))
                         throw new Error("A legacy lock owner is running; stop every host before migration.");
                 }
+                if (path.basename(item.source) === "state.json") {
+                    try {
+                        inspectJsonQueue(JSON.parse(before.toString("utf8")));
+                    }
+                    catch (error) {
+                        if (error instanceof SyntaxError)
+                            throw new Error("Invalid legacy queue JSON; inspect before migration.");
+                        throw error;
+                    }
+                }
                 await fs.writeFile(target, before, { flag: "wx", mode: 0o600 });
                 if (sha256(await fs.readFile(source)) !== sha256(before))
                     throw new Error(`Source changed during migration: ${item.source}`);
@@ -138,6 +177,12 @@ export async function migrateProject(input) {
         for (const file of record.files)
             if (sha256(await fs.readFile(path.join(staging, path.relative(".autoskill", file.target)))) !== file.sha256)
                 throw new Error("Staged migration hash mismatch.");
+        for (const file of record.files)
+            if (file.kind === "file" && sha256(await fs.readFile(path.join(root, file.source))) !== file.sha256)
+                throw new Error("Legacy data changed during migration; stop every host before retrying.");
+        const finalSources = [...await walk(root, path.join(root, ".opencode", "skills")), ...await walk(root, path.join(root, ".opencode", "autoskill"))].filter(file => !/\.(?:sqlite)-(?:wal|shm|journal)$/.test(file)).sort();
+        if (JSON.stringify(finalSources) !== JSON.stringify([...sources].sort()))
+            throw new Error("Legacy files changed during migration; stop every host before retrying.");
         for (const name of ["runtime", "skills"]) {
             const source = path.join(staging, name), target = path.join(base, name);
             if (await exists(target))
@@ -161,7 +206,11 @@ export async function migrateProject(input) {
                 await assertSafePath(directory);
                 if (path.dirname(directory) !== base)
                     throw new Error("Unsafe migration rollback path.");
-                await fs.rm(directory, { recursive: true, force: true });
+                const actual = await walk(root, directory), expected = record.files.filter(file => path.dirname(path.relative(directory, path.join(root, file.target))) !== ".." && !path.relative(directory, path.join(root, file.target)).startsWith(`..${path.sep}`));
+                if (actual.length === expected.length && actual.every(file => expected.some(item => item.target === file)) && (await Promise.all(expected.map(async (file) => sha256(await fs.readFile(path.join(root, file.target))) === file.sha256))).every(Boolean))
+                    await fs.rm(directory, { recursive: true, force: true });
+                // Concurrent edits are left intact for inspection; never delete data
+                // merely because its destination was created by this migration.
             }
             if (manifestWritten)
                 await fs.unlink(manifestFile);
@@ -218,4 +267,23 @@ export async function rollbackMigration(input) {
         return { status: "dry-run", action: "rollback", files: record.files.length };
     const lock = await fs.open(path.join(base, "migration.lock"), "wx", 0o600);
     try {
-  
+        if (sha256(await readSafeFile(config) ?? "") !== record.configHash)
+            throw new Error("Configuration changed during rollback.");
+        for (const file of record.files)
+            if (sha256(await fs.readFile(path.join(root, file.target))) !== file.sha256)
+                throw new Error("Data changed during rollback.");
+        // Rename the marker first to atomically return new instances to legacy paths;
+        // keep neutral snapshots recoverable instead of recursively deleting them.
+        await fs.rename(config, path.join(base, `config.rolled-back-${record.id}.json`));
+        await fs.rename(manifestFile, path.join(base, `migration.rolled-back-${record.id}.json`));
+        for (const name of ["runtime", "skills"])
+            if (await exists(path.join(base, name)))
+                await fs.rename(path.join(base, name), path.join(base, `${name}.rolled-back-${record.id}`));
+        return { status: "rolled-back", originalsPreserved: true, snapshotsPreserved: true };
+    }
+    finally {
+        await lock.close();
+        await fs.unlink(path.join(base, "migration.lock"));
+    }
+}
+//# sourceMappingURL=migration.js.map

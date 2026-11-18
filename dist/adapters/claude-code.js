@@ -7,6 +7,9 @@ export const CLAUDE_CODE_CAPABILITIES = {
 };
 export function normalizeClaudeCode(value) {
     const input = inputRecord(value), event = baseHook("claude-code", input);
+    // Claude documents agent_id only for subagents and in-process teammates.
+    if (input.agent_id)
+        event.origin = "subagent";
     switch (event.eventName) {
         case "SessionStart":
             event.kind = "session-start";

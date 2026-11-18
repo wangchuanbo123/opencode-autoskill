@@ -10,6 +10,8 @@ export const CLAUDE_CODE_CAPABILITIES: AdapterCapabilities = {
 
 export function normalizeClaudeCode(value: unknown): NormalizedHook {
   const input = inputRecord(value), event = baseHook("claude-code", input);
+  // Claude documents agent_id only for subagents and in-process teammates.
+  if (input.agent_id) event.origin = "subagent";
   switch (event.eventName) {
     case "SessionStart": event.kind = "session-start"; return event;
     case "UserPromptSubmit": return taskStart(event, input);

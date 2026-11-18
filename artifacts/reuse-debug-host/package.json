@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "opencode-autoskill": "file:../fixed/opencode-autoskill-0.4.0.tgz"
+  }
+}

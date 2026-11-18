@@ -60,7 +60,7 @@ export function readOptions(input = {}) {
         output.enabled = input.enabled;
     }
     if (input.agentPolicy !== undefined) {
-        if (!["root-only", "inherit", "independent"].includes(String(input.agentPolicy)))
+        if (typeof input.agentPolicy !== "string" || !["root-only", "inherit", "independent"].includes(input.agentPolicy))
             throw new Error("agentPolicy must be root-only, inherit or independent.");
         output.agentPolicy = input.agentPolicy;
     }
